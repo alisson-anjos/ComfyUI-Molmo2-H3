@@ -5,7 +5,7 @@ import torch
 from comfy_api.latest import io
 from comfy_extras.nodes_minimax_h3 import MiniMaxH3ReferenceToVideo,_resize
 import comfy.model_management as mm
-from . import MolmoProjectedCLIP,MolmoServer
+from . import MolmoProjectedCLIP
 from .generation import prompt_with_point_contract
 
 
@@ -77,7 +77,7 @@ class MolmoH3AnalyzeReferences(io.ComfyNode):
             visuals.append({'type':'video','data':selected,'timestamps':[int(i)/clip.source_guide_fps for i in ids]})
         mm.unload_all_models();mm.soft_empty_cache()
         request=prompt_with_point_contract(prompt,visuals)
-        answer=MolmoServer.get(clip.python,clip.model).generate(request,visuals,max_new_tokens,clip.phase_b_max_frames)
+        answer=clip.generate_prompt(request,visuals,max_new_tokens)
         points=answer['points']
         response=answer['text']
         point_request=request != prompt

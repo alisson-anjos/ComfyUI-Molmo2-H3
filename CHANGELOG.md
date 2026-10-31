@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3 - 2026-10-31
+
+- Implement ComfyUI's native CLIP `tokenize` / `generate` / `decode` contract so the projected Molmo encoder connects directly to the built-in Generate Text node with text, image and video inputs. The analysis node now reuses that same generation path; native sampling controls are forwarded to Molmo.
+- Report invalid or empty model-generation outputs with a traceback instead of failing later with an opaque `NoneType` error.
+- Validation: source syntax and patch formatting checked; end-to-end Generate Text inference remains pending a manual ComfyUI restart and GPU run.
+- Publication: local changes only; not pushed or published.
+
 ## 0.4.2 - 2026-10-31
 
 - Run the Molmo worker with ComfyUI's own Python; remove the extra `molmo-env` and `HENGE_MOLMO_PYTHON` setup from the user workflow. ConvRot registers the standard RoPE formula when Transformers 5.x omits its old `default` entry.

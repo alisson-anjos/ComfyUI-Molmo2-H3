@@ -11,7 +11,7 @@ git clone https://github.com/alisson-anjos/ComfyUI-Molmo2-H3.git
 python -m pip install -r ComfyUI-Molmo2-H3/requirements.txt
 ```
 
-Add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`); it has no inputs and returns a `CLIP` output. It uses ComfyUI's own Python and model folders. The node downloads missing files from the public INT8 package at `Alissonerdx/Molmo2-8B-Minimax-H3` into `ComfyUI/models/text_encoders/Molmo2-8B-Minimax-H3/`, keeping files already present. A fresh install needs about 9.7 GB; if only the projector is missing, it downloads only that projector. The custom ConvRot loader handles the single `.safetensors` model file and the separate projector.
+Add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`); it has no inputs and returns a `CLIP` output. It uses ComfyUI's own Python and model folders, and implements ComfyUI's `tokenize` → `generate` → `decode` text-generation interface. Connect it directly to the native **Generate Text** node for text, image and video prompts. The node downloads missing files from the public INT8 package at `Alissonerdx/Molmo2-8B-Minimax-H3` into `ComfyUI/models/text_encoders/Molmo2-8B-Minimax-H3/`, keeping files already present. A fresh install needs about 9.7 GB; if only the projector is missing, it downloads only that projector. The custom ConvRot loader handles the single `.safetensors` model file and the separate projector.
 
 Remove the previous standalone `comfyui_molmo_h3` custom-node installation before enabling this package, so the same node ID is not registered twice. The folder inside the downloaded HF model is an alternative copy of this node, not a second required installation.
 
@@ -19,7 +19,7 @@ Remove the previous standalone `comfyui_molmo_h3` custom-node installation befor
 
 Connect the loader's **CLIP** output to MiniMax H3's text/reference conditioning CLIP input. Native H3 VAE reference inputs continue to supply replacement appearance. The Molmo H3 reference node enables visual encoding for that request; the loader itself only loads Molmo and its projector.
 
-For source-photo analysis, use **Molmo2 Analyze References / Points** to provide the original-person photo and guide frames. Put the replacement photo in H3's ordinary reference input. These are separate roles. No SAM or edit mask is introduced by the encoder loader. See `examples/loader_api.json` for the loader configuration; it is a fragment to insert into an existing H3 API workflow, not a standalone video generator.
+For source-photo analysis, use **Molmo2 Analyze References / Points** to provide the original-person photo and guide frames. It uses the same CLIP generation method as **Generate Text**. Put the replacement photo in H3's ordinary reference input. These are separate roles. See `examples/loader_api.json` for the loader configuration; it is a fragment to insert into an existing H3 API workflow, not a standalone video generator.
 
 ## Reference, analysis and tracking nodes
 

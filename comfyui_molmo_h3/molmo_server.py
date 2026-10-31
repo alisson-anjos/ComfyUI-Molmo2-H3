@@ -1,4 +1,4 @@
-"""Molmo2 hidden-state server, run in Molmo2's own Python (its transformers version never touches ComfyUI's).
+"""Molmo2 worker server, run in a subprocess with ComfyUI's Python environment.
 
 One JSON request per line on stdin: {"ids": [...], "tap": 24, "out": "/tmp/x.npy"}. The language model runs on those
 exact token ids. Optional visuals are .npy paths with image/video type and timestamps; their prefix is
@@ -11,6 +11,7 @@ import json
 import os
 import importlib.util
 import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -75,8 +76,43 @@ def main():
                     processor = AutoProcessor.from_pretrained(sys.argv[1], trust_remote_code=True)
                 batch, presentation = generation_inputs(processor, request['prompt'], request.get('visuals', []), request.get('max_video_frames', 8))
                 model.to('cuda'); batch = batch.to('cuda')
-                with torch.inference_mode():
-                    seq = model.generate(**batch, max_new_tokens=request.get('max_new_tokens', 1024), do_sample=False)
+                sampling = request.get('sampling') or {}
+                options = {'max_new_tokens': request.get('max_new_tokens', 1024),
+                           'do_sample': bool(sampling.get('do_sample', False))}
+                if options['do_sample']:
+                    options.update(temperature=max(1e-5, float(sampling.get('temperature', .7))),
+                                   top_k=int(sampling.get('top_k', 64)), top_p=float(sampling.get('top_p', .95)))
+                options['repetition_penalty'] = max(1e-5, float(sampling.get('repetition_penalty', 1.05)))
+                processors = []
+                min_p = float(sampling.get('min_p', .05)) if options['do_sample'] else 0.0
+                if min_p > 0:
+                    from transformers.generation.logits_process import MinPLogitsWarper
+                    processors.append(MinPLogitsWarper(min_p))
+                presence = float(sampling.get('presence_penalty', 0.0)) if options['do_sample'] else 0.0
+                if presence:
+                    from transformers.generation.logits_process import LogitsProcessor
+                    prompt_length = batch['input_ids'].shape[1]
+                    class PresencePenalty(LogitsProcessor):
+                        def __call__(self, input_ids, scores):
+                            for row in range(input_ids.shape[0]):
+                                seen = input_ids[row, prompt_length:].unique()
+                                if seen.numel(): scores[row, seen] -= presence
+                            return scores
+                    processors.append(PresencePenalty())
+                if processors:
+                    from transformers.generation.logits_process import LogitsProcessorList
+                    options['logits_processor'] = LogitsProcessorList(processors)
+                if sampling.get('seed') is not None:
+                    with torch.random.fork_rng(devices=[torch.cuda.current_device()]):
+                        torch.manual_seed(int(sampling['seed'])); torch.cuda.manual_seed(int(sampling['seed']))
+                        with torch.inference_mode(): seq = model.generate(**batch, **options)
+                else:
+                    with torch.inference_mode(): seq = model.generate(**batch, **options)
+                if seq is None:
+                    raise RuntimeError('Molmo2 model.generate returned None')
+                if isinstance(seq, dict): seq = seq.get('sequences')
+                if seq is None or not hasattr(seq, 'shape') or seq.shape[0] == 0:
+                    raise RuntimeError('Molmo2 model.generate returned no token sequences')
                 answer = processor.tokenizer.decode(seq[0, batch['input_ids'].shape[1]:], skip_special_tokens=True)
                 result = {'text':answer, 'points':response_points(answer,presentation)}
                 with open(request['out'],'w') as f:json.dump(result,f)
@@ -108,7 +144,8 @@ def main():
                 torch.cuda.empty_cache()
             print('OK ' + request['out'], flush=True)
         except Exception as exc:  # one bad request must not kill the warm model
-            print('ERR ' + str(exc).replace('\n', ' ')[:2000], flush=True)
+            detail = ' | '.join(traceback.format_exc().strip().splitlines()[-8:])
+            print('ERR ' + (str(exc) + ' [' + detail + ']')[:3500], flush=True)
 
 
 if __name__ == '__main__':

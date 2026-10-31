@@ -1,8 +1,9 @@
 """Molmo2 as the MiniMax H3 text encoder, through a calibrated projection (experimental).
 
 A ClipProj-style projection (https://github.com/nicolab28/ComfyUI-ClipProj, MIT; same file format and maths) maps
-Molmo2-8B's hidden states to the conditioning H3's 32B Qwen3-VL encoder produces. Molmo2 runs in its own Python,
-started once and kept warm. Phase A covers text: reference pictures and videos keep their native H3 latent path, and
+Molmo2-8B's hidden states to the conditioning H3's 32B Qwen3-VL encoder produces. Molmo2 runs in a worker process
+using ComfyUI's own Python, started once and kept warm. The projected CLIP implements ComfyUI's native text-generation
+API. Phase A covers text: reference pictures and videos keep their native H3 latent path, and
 only their <Picture N>/<Video N> labels reach Molmo2.
 """
 import json
@@ -101,7 +102,7 @@ class MolmoServer:
             return res
 
 
-    def generate(self, prompt, visuals, max_new_tokens=1024, max_video_frames=8):
+    def generate(self, prompt, visuals, max_new_tokens=1024, max_video_frames=8, **sampling):
         import numpy as np
         with self.lock, tempfile.TemporaryDirectory(prefix='molmo-answer-') as folder:
             items=[]
@@ -112,7 +113,8 @@ class MolmoServer:
                 items.append({'type':item['type'],'path':path,'timestamps':item.get('timestamps',[])})
             out=os.path.join(folder,'answer.json')
             self.proc.stdin.write(json.dumps({'mode':'generate','prompt':prompt,'visuals':items,
-                'out':out,'max_new_tokens':max_new_tokens,'max_video_frames':max_video_frames})+'\n')
+                'out':out,'max_new_tokens':max_new_tokens,'max_video_frames':max_video_frames,
+                'sampling':sampling})+'\n')
             self.proc.stdin.flush()
             reply=self.proc.stdout.readline().strip()
             if not reply.startswith('OK '):raise RuntimeError('Molmo2 failed: '+reply)
@@ -140,7 +142,7 @@ class MolmoProjectedCLIP:
     def clone(self):
         return self
 
-    def tokenize(self, text, return_word_ids=False, images=[], minimax_ref_items=None, **kwargs):
+    def tokenize(self, text, return_word_ids=False, images=None, minimax_ref_items=None, **kwargs):
         ids = []
         def add(s):
             ids.extend(self.tokenizer.encode(s, add_special_tokens=False).ids)
@@ -149,6 +151,7 @@ class MolmoProjectedCLIP:
             kind = item['type'];counters[kind] = counters.get(kind, 0) + 1
             # Phase A: only the label; the picture/video itself reaches H3 through its VAE latent.
             add({'image': '<Picture %d>: ', 'video': '<Video %d>: ', 'audio': '<Audio %d>: '}.get(kind, '<Picture %d>: ') % counters[kind])
+        images = images or []
         if not minimax_ref_items:
             for i, _ in enumerate(images):
                 add('<Picture %d>: ' % (i + 1))
@@ -169,7 +172,45 @@ class MolmoProjectedCLIP:
             if self.source_guide is not None and not any(v['type']=='video' for v in tokens['molmo_visuals']):
                 tokens['molmo_visuals'].append({'type':'video', 'data':self.source_guide,
                     'timestamps':[i/self.source_guide_fps for i in range(len(self.source_guide))]})
+        # ComfyUI's native Generate Text calls tokenize() first, then generate()
+        # and decode(). Preserve the raw prompt and optional visual inputs in the
+        # token packet so Molmo's own processor can prepare its multimodal chat.
+        generation_visuals = list(kwargs.get('generation_visuals') or [])
+        image = kwargs.get('image')
+        if image is not None:
+            generation_visuals.extend({'type': 'image', 'data': image[i:i+1]} for i in range(len(image)))
+        video = kwargs.get('video')
+        if video is not None and len(video):
+            fps = float(kwargs.get('video_fps', 24.0))
+            generation_visuals.append({'type': 'video', 'data': video,
+                'timestamps':[i/fps for i in range(len(video))]})
+        tokens['molmo_generation_prompt'] = text
+        tokens['molmo_generation_visuals'] = generation_visuals
         return tokens
+
+    def generate(self, tokens, do_sample=True, max_length=256, temperature=0.7, top_k=64, top_p=0.95,
+                 min_p=0.05, repetition_penalty=1.05, seed=None, presence_penalty=0.0, mtp=True):
+        """Implement ComfyUI's native CLIP text-generation contract."""
+        if not isinstance(tokens, dict) or 'molmo_generation_prompt' not in tokens:
+            raise ValueError('Molmo2 Generate Text expects tokens returned by this encoder')
+        return MolmoServer.get(self.python, self.model).generate(
+            tokens['molmo_generation_prompt'], tokens.get('molmo_generation_visuals', []), max_length,
+            self.phase_b_max_frames, do_sample=do_sample, temperature=temperature, top_k=top_k,
+            top_p=top_p, min_p=min_p, repetition_penalty=repetition_penalty,
+            seed=seed, presence_penalty=presence_penalty)
+
+    @staticmethod
+    def decode(result, skip_special_tokens=True):
+        """Return generated text for ComfyUI's TextGenerate node."""
+        if isinstance(result, dict) and 'text' in result:
+            return result['text']
+        if isinstance(result, str):
+            return result
+        raise TypeError(f'Unexpected Molmo2 generation result: {type(result).__name__}')
+
+    def generate_prompt(self, prompt, visuals=None, max_new_tokens=1024):
+        tokens = self.tokenize(prompt, generation_visuals=visuals or [])
+        return self.generate(tokens, do_sample=False, max_length=max_new_tokens)
 
     def _encode(self, tokens):
         ids = [t[0] for t in tokens['molmo'][0]]
