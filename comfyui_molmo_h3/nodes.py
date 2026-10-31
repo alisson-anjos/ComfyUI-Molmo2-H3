@@ -6,6 +6,7 @@ from comfy_api.latest import io
 from comfy_extras.nodes_minimax_h3 import MiniMaxH3ReferenceToVideo,_resize
 import comfy.model_management as mm
 from . import MolmoProjectedCLIP,MolmoServer
+from .generation import prompt_with_point_contract
 
 
 def molmo_clip(clip):
@@ -75,8 +76,16 @@ class MolmoH3AnalyzeReferences(io.ComfyNode):
             selected=_resize(frames[ids],max(32,round(w*scale/32)*32),max(32,round(h*scale/32)*32),'disabled')
             visuals.append({'type':'video','data':selected,'timestamps':[int(i)/clip.source_guide_fps for i in ids]})
         mm.unload_all_models();mm.soft_empty_cache()
-        answer=MolmoServer.get(clip.python,clip.model).generate(prompt,visuals,max_new_tokens,clip.phase_b_max_frames)
-        return io.NodeOutput(answer['text'],json.dumps(answer['points']),answer['points']['description'])
+        request=prompt_with_point_contract(prompt,visuals)
+        answer=MolmoServer.get(clip.python,clip.model).generate(request,visuals,max_new_tokens,clip.phase_b_max_frames)
+        points=answer['points']
+        response=answer['text']
+        point_request=request != prompt
+        if any(v['type']=='video' for v in visuals) and not points['points'] and point_request:
+            response=('No native point coordinates were returned, so no points were created. Try a direct request '
+                      'such as “Point to the person shown in Picture 1 in each frame of Video 1.”\n\nMolmo response: '+response)
+        sam_prompt='' if point_request and not points['points'] else points['description']
+        return io.NodeOutput(response,json.dumps(points),sam_prompt)
 
 
 class MolmoH3DrawPoints(io.ComfyNode):

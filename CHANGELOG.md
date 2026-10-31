@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-10-31
+
+- Make video localization prompts request Molmo's native point/track coordinate format; timestamp-only prose now yields a clear no-points status and an empty SAM prompt instead of misleading output.
+- Validation: source changes reviewed; live reference-video inference still needs to confirm coordinate generation for the user's exact clip and prompt.
+- Publication: local changes only; not pushed or published.
+
 ## 0.3.0 - 2026-10-31
 
 - Simplify the Molmo H3 encoder loader to one model-package dropdown and one `CLIP` output. The projector is resolved from the selected package, and the Molmo Python runtime is resolved internally from the ComfyUI service environment.

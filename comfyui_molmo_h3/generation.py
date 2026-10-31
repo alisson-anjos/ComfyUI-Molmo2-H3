@@ -4,6 +4,29 @@ import numpy as np
 from PIL import Image
 
 
+POINT_REQUEST = re.compile(
+    r'\b(point|points|track|tracking|mark|locate|position|localize|find|marc[ae]|marcar|localiz[ae]|posi[cç][aã]o|rastre[ae])\b',
+    re.IGNORECASE,
+)
+
+
+def prompt_with_point_contract(prompt, visuals):
+    """Ask for Molmo's native coordinates on point/track requests with video frames."""
+    if not any(v.get('type') == 'video' for v in visuals) or not POINT_REQUEST.search(prompt):
+        return prompt
+    return (prompt.rstrip() + '\n\n'
+        'Treat the timestamped Video frames as one ordered clip. Locate the exact target requested above; '
+        'when the request identifies a Picture, follow the same visual identity from that Picture. Track '
+        'that one target across the supplied video frames and keep its object ID stable. Return Molmo native '
+        'visual pointing coordinates inside a '
+        '<points coords="..."/> or <tracks coords="..."/> tag. Each entry must contain '
+        'the 1-based visual image index, a stable object ID, and normalized x and y coordinates '
+        'from 000 to 1000, for example: <points coords="2 1 500 500;3 1 520 510"/>. '
+        'The visual images are presented in order; skip reference-photo indices and include only '
+        'indices belonging to video frames. Do not answer with a timestamp-only list or use 0 as '
+        'a placeholder. Never invent a point: if the target cannot be located, say so and return no coordinates.')
+
+
 def generation_inputs(processor,prompt,visuals,max_frames=8):
     content=[];presentation=[];counts={}
     for item in visuals:
@@ -36,5 +59,8 @@ def response_points(text,presentation):
                 if 0<=x<=1 and 0<=y<=1:
                     points.append({**frame,'object_id':oid,'x':x,'y':y})
     # Keep only observed times; never fabricate per-frame tracking by interpolation.
+    note='Object IDs are scoped to this request. Points cover sampled frames only.'
+    if any(p.get('kind') == 'video' for p in presentation) and not points:
+        note += ' Molmo returned no parseable native coordinates; no points were fabricated. Rephrase as “Point to … in each video frame” or “Track … through the video”.'
     return {'version':1,'points':points,'description':re.sub(r'</?(?:points|tracks)\b[^>]*>','',text).strip(),
-            'note':'Object IDs are scoped to this request. Points cover sampled frames only.'}
+            'note':note}

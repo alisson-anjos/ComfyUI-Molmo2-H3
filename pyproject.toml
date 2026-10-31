@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-molmo2-h3"
 description = "Experimental Molmo2-8B encoder for MiniMax H3 with separate projectors and standalone INT8 ConvRot loading."
-version = "0.3.0"
+version = "0.3.1"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
 dependencies = ["torch", "numpy", "safetensors", "tokenizers"]
