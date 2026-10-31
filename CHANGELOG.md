@@ -5,7 +5,7 @@
 - Implement ComfyUI's native CLIP `tokenize` / `generate` / `decode` contract so the projected Molmo encoder connects directly to the built-in Generate Text node with text, image and video inputs. The analysis node now reuses that same generation path; native sampling controls are forwarded to Molmo.
 - Report invalid or empty model-generation outputs with a traceback instead of failing later with an opaque `NoneType` error.
 - Validation: source syntax and patch formatting checked; end-to-end Generate Text inference remains pending a manual ComfyUI restart and GPU run.
-- Publication: local changes only; not pushed or published.
+- Publication: source version 0.4.3 pushed to `main`; registry package was not published.
 
 ## 0.4.2 - 2026-10-31
 
