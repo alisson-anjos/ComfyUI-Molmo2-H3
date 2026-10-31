@@ -35,8 +35,8 @@ def main():
             shutil.copy2(path,out/path.name)
     shutil.copy2(Path(__file__).with_name('convrot_runtime.py'),out/'convrot_runtime.py')
     index=json.loads((source/'model.safetensors.index.json').read_text())
+    tensors={}
     for i,filename in enumerate(sorted(set(index['weight_map'].values()))):
-        tensors={}
         with safe_open(source/filename,framework='pt',device='cpu') as f:
             for key in f.keys():
                 w=f.get_tensor(key)
@@ -54,10 +54,11 @@ def main():
                     tensors[name+'.scales']=torch.cat(ss)
                 else:
                     tensors[key]=w.to(torch.bfloat16) if w.is_floating_point() else w
-        dest=f'model-convrot-{i+1:05d}.safetensors'
-        save_file(tensors,str(out/dest))
-        manifest['shards'].append(dest)
-        print('SAVED',dest,flush=True)
+        print('PROCESSED',filename,flush=True)
+    dest='molmo2_8b_int8_convrot.safetensors'
+    save_file(tensors,str(out/dest),metadata={'format':'pt','quantization':'molmo2-convrot-int8-v1'})
+    manifest['shards']=[dest]
+    print('SAVED',dest,flush=True)
     (out/'convrot_config.json').write_text(json.dumps(manifest,indent=2))
     print('DONE',out,flush=True)
 

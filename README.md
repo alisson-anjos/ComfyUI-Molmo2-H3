@@ -1,6 +1,6 @@
 # ComfyUI-Molmo2-H3
 
-Experimental Molmo2-8B encoder for MiniMax H3. Supports the original Molmo model and the complete [INT8 ConvRot package](https://huggingface.co/Alissonerdx/Molmo2-8B-Minimax-H3). Model weights and projectors live on Hugging Face; this repository contains the ComfyUI node and reproducible conversion scripts.
+Experimental Molmo2-8B encoder for MiniMax H3. Supports the original Molmo model and the complete [INT8 ConvRot package](https://huggingface.co/Alissonerdx/Molmo2-8B-Minimax-H3). The complete Molmo weight is a single `molmo2_8b_int8_convrot.safetensors` file; the projector remains a separate file. Both live on Hugging Face; this repository contains the ComfyUI node and reproducible conversion scripts.
 
 ## Install
 
