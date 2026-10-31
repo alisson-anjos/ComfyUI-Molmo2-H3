@@ -59,20 +59,28 @@ def resolve_model(selection=None):
     root = next((p for p in candidates if (p/'molmo2_8b_int8_convrot.safetensors').is_file()),
                 Path(roots[0]) / MODEL_FOLDER)
 
-    def complete():
-        files=[root/'config.json',root/'convrot_config.json',root/'molmo2_8b_int8_convrot.safetensors',
-               root/'projections'/PROJECTOR_NAME,root/'tokenizer.json']
-        if not all(path.is_file() for path in files):return False
-        # Detect Git-LFS pointer files from a plain git clone without fetched LFS objects.
-        return files[2].stat().st_size > 1_000_000_000 and files[3].stat().st_size > 1_000_000
+    def missing_files():
+        missing=[]
+        for name in PACKAGE_FILES:
+            path=root/name
+            if not path.is_file():
+                missing.append(name);continue
+            # Detect Git-LFS pointer files from a plain git clone without fetched LFS objects.
+            if name == 'molmo2_8b_int8_convrot.safetensors' and path.stat().st_size <= 1_000_000_000:
+                missing.append(name)
+            elif name == f'projections/{PROJECTOR_NAME}' and path.stat().st_size <= 1_000_000:
+                missing.append(name)
+        return missing
 
     with PACKAGE_LOCK:
-        if not complete():
+        missing=missing_files()
+        if missing:
             from huggingface_hub import snapshot_download
-            print(f'[Molmo H3] Downloading {MODEL_REPO} into {root} (about 9.7 GB on first use)', flush=True)
-            snapshot_download(repo_id=MODEL_REPO, local_dir=str(root), allow_patterns=PACKAGE_FILES)
-        if not complete():
-            raise RuntimeError('Molmo package download is incomplete or contains Git-LFS pointer files')
+            print(f'[Molmo H3] Downloading {len(missing)} missing package files from {MODEL_REPO} into {root}', flush=True)
+            snapshot_download(repo_id=MODEL_REPO, local_dir=str(root), allow_patterns=missing)
+        missing=missing_files()
+        if missing:
+            raise RuntimeError(f'Molmo package download is incomplete or contains Git-LFS pointer files: {missing}')
     return str(root)
 
 

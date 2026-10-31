@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 - 2026-10-31
+
+- Download only missing Molmo package files. An existing INT8 checkpoint is kept when only the separate projector is missing.
+- Validation: Python compilation passed; current cloned package resolves without downloading model files.
+- Publication: local changes only; not pushed or published.
+
 ## 0.4.0 - 2026-10-31
 
 - Remove the Molmo package selector from the H3 encoder loader. The no-input loader downloads the public INT8 ConvRot model and separate projector on first use, then returns the projected `CLIP`.
