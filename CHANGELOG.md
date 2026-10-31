@@ -4,7 +4,7 @@
 
 - Run the Molmo worker with ComfyUI's own Python; remove the extra `molmo-env` and `HENGE_MOLMO_PYTHON` setup from the user workflow. ConvRot registers the standard RoPE formula when Transformers 5.x omits its old `default` entry.
 - Validation: ComfyUI's Python loads the INT8 ConvRot model and Molmo2Processor; the Transformers 5 processor compatibility path passed with image and video options. End-to-end video generation remains to be confirmed.
-- Publication: local changes only; not pushed or published.
+- Publication: source pushed to `main` in `98b43c1`; Comfy Registry workflow is queued.
 
 ## 0.4.1 - 2026-10-31
 
