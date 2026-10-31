@@ -18,15 +18,15 @@ python -m venv molmo-env
 molmo-env/bin/python -m pip install -r ComfyUI-Molmo2-H3/requirements-molmo.txt
 ```
 
-On Windows use `molmo-env\Scripts\python.exe`. Download the complete HF package into `ComfyUI/models/text_encoders/Molmo2-8B-Minimax-H3/`, restart ComfyUI and add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`). Select `Molmo2-8B-Minimax-H3/molmo2_8b_int8_convrot.safetensors` in the `molmo_path` dropdown and set `molmo_python` to the separate environment's executable. Select `bundled_default` to find the separate projector under `projections/`; or install another projector in `models/clip_projections/` and select it explicitly.
+On Windows use `molmo-env\Scripts\python.exe`. Download the complete HF package into `ComfyUI/models/text_encoders/Molmo2-8B-Minimax-H3/`, restart ComfyUI and add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`). The node has one input: select the Molmo2 package in the `molmo_path` dropdown. It finds the separate projector in that package and returns a `CLIP` output. Configure the ComfyUI service's `HENGE_MOLMO_PYTHON` environment variable once to point to the separate Molmo Python; it is an installation setting, not a per-workflow input.
 
 Remove the previous standalone `comfyui_molmo_h3` custom-node installation before enabling this package, so the same node ID is not registered twice. The folder inside the downloaded HF model is an alternative copy of this node, not a second required installation.
 
 ## Workflow
 
-Connect the loader's **CLIP** output to MiniMax H3's text/reference conditioning CLIP input. Native H3 VAE reference inputs continue to supply replacement appearance. Optional visual mode sends reference images and timestamped guide frames to Molmo before projecting text-suffix hidden states.
+Connect the loader's **CLIP** output to MiniMax H3's text/reference conditioning CLIP input. Native H3 VAE reference inputs continue to supply replacement appearance. The Molmo H3 reference node enables visual encoding for that request; the loader itself only loads Molmo and its projector.
 
-For source-photo experiments, connect the original-person photo to `source_person_photo` and original video frames to `source_guide`. Put the replacement photo in H3's ordinary reference input. These are separate roles. No SAM or edit mask is introduced by this loader. See `examples/loader_api.json` for the loader configuration; it is a fragment to insert into an existing H3 API workflow, not a standalone video generator.
+For source-photo analysis, use **Molmo2 Analyze References / Points** to provide the original-person photo and guide frames. Put the replacement photo in H3's ordinary reference input. These are separate roles. No SAM or edit mask is introduced by the encoder loader. See `examples/loader_api.json` for the loader configuration; it is a fragment to insert into an existing H3 API workflow, not a standalone video generator.
 
 ## Reference, analysis and tracking nodes
 

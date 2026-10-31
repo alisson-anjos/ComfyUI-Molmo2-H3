@@ -12,7 +12,7 @@ import tempfile
 import threading
 
 import torch
-from .model_paths import model_choices, resolve_model
+from .model_paths import model_choices, resolve_model, resolve_projector, resolve_molmo_python
 import folder_paths
 import comfy.model_management as mm
 
@@ -215,13 +215,7 @@ class MolmoProjectedCLIP:
 class MolmoH3EncoderLoader:
     @classmethod
     def INPUT_TYPES(cls):
-        return {'required': {'molmo_path': (model_choices(),),
-                             'projection': (['bundled_default'] + folder_paths.get_filename_list('clip_projections'),),
-                             'molmo_python': ('STRING', {'default': os.environ.get('HENGE_MOLMO_PYTHON', '')})},
-                'optional': {'phase_b_vision': ('BOOLEAN', {'default': False}),
-                             'phase_b_max_frames': ('INT', {'default': 8, 'min': 1, 'max': 64}),
-                             'source_person_photo': ('IMAGE',), 'source_guide': ('IMAGE',),
-                             'source_guide_fps': ('FLOAT', {'default':24.,'min':.1,'max':120.})}}
+        return {'required': {'molmo_path': (model_choices(),)}}
     @classmethod
     def VALIDATE_INPUTS(cls, molmo_path):
         try:
@@ -232,20 +226,9 @@ class MolmoH3EncoderLoader:
 
     RETURN_TYPES = ('CLIP',); FUNCTION = 'load'; CATEGORY = 'Molmo2/H3'
 
-    def load(self, molmo_path, projection, molmo_python, phase_b_vision=False, phase_b_max_frames=8,
-             source_person_photo=None, source_guide=None, source_guide_fps=24.):
+    def load(self, molmo_path):
         molmo_path = resolve_model(molmo_path)
-        if not os.path.isfile(molmo_python):
-            raise ValueError('molmo_python must be the Python of the Molmo2 environment (HENGE_MOLMO_PYTHON)')
-        if projection == 'bundled_default':
-            projection_path = os.path.join(molmo_path, 'projections', 'molmo2-8b-h3-tap24-phaseb-pilot.safetensors')
-            if not os.path.isfile(projection_path):
-                raise ValueError('No bundled projector found; select an installed clip_projections file')
-        else:
-            projection_path = folder_paths.get_full_path('clip_projections', projection)
-        vision = phase_b_vision or source_person_photo is not None or source_guide is not None
-        return (MolmoProjectedCLIP(molmo_python, molmo_path, projection_path,
-                vision, phase_b_max_frames, source_person_photo, source_guide, source_guide_fps),)
+        return (MolmoProjectedCLIP(resolve_molmo_python(), molmo_path, resolve_projector(molmo_path)),)
 
 
 NODE_CLASS_MAPPINGS = {'MolmoH3EncoderLoader': MolmoH3EncoderLoader}

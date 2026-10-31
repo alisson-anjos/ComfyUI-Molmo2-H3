@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 - 2026-10-31
+
+- Simplify the Molmo H3 encoder loader to one model-package dropdown and one `CLIP` output. The projector is resolved from the selected package, and the Molmo Python runtime is resolved internally from the ComfyUI service environment.
+- Keep source-photo/video analysis controls in the dedicated analysis node instead of the encoder loader.
+- Validation: Python compilation passed; live ComfyUI schema returns only the Molmo package dropdown and a `CLIP` output, with no optional workflow controls.
+- Publication: source update pending.
+
 ## 0.2.0 - 2026-10-31
 
 - Discover complete Molmo packages from the `text_encoders` dropdown; retain existing absolute-folder calls.

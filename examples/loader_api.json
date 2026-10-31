@@ -2,11 +2,7 @@
   "5": {
     "class_type": "MolmoH3EncoderLoader",
     "inputs": {
-      "molmo_path": "Molmo2-8B-Minimax-H3/molmo2_8b_int8_convrot.safetensors",
-      "projection": "bundled_default",
-      "molmo_python": "molmo-env/bin/python",
-      "phase_b_vision": true,
-      "phase_b_max_frames": 8
+      "molmo_path": "Molmo2-8B-Minimax-H3/molmo2_8b_int8_convrot.safetensors"
     }
   }
 }
