@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 - 2026-10-31
+
+- Remove the Molmo package selector from the H3 encoder loader. The no-input loader downloads the public INT8 ConvRot model and separate projector on first use, then returns the projected `CLIP`.
+- Restrict the download to runtime/model files; evaluation videos and reports in the model repository are not downloaded.
+- Validation: Python compilation passed; the local no-input loader resolves the cloned INT8 package and separate projector; an INT8 Molmo text-generation smoke returned `Hello!` using Transformers 4.57.1. First-run download in a clean ComfyUI install remains untested.
+- Publication: local changes only; not pushed or published.
+
 ## 0.3.1 - 2026-10-31
 
 - Make video localization prompts request Molmo's native point/track coordinate format; timestamp-only prose now yields a clear no-points status and an empty SAM prompt instead of misleading output.

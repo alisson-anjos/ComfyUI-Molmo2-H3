@@ -12,7 +12,7 @@ import tempfile
 import threading
 
 import torch
-from .model_paths import model_choices, resolve_model, resolve_projector, resolve_molmo_python
+from .model_paths import resolve_model, resolve_projector, resolve_molmo_python
 import folder_paths
 import comfy.model_management as mm
 
@@ -215,19 +215,12 @@ class MolmoProjectedCLIP:
 class MolmoH3EncoderLoader:
     @classmethod
     def INPUT_TYPES(cls):
-        return {'required': {'molmo_path': (model_choices(),)}}
-    @classmethod
-    def VALIDATE_INPUTS(cls, molmo_path):
-        try:
-            resolve_model(molmo_path)
-            return True
-        except ValueError as exc:
-            return str(exc)
+        return {'required': {}}
 
     RETURN_TYPES = ('CLIP',); FUNCTION = 'load'; CATEGORY = 'Molmo2/H3'
 
-    def load(self, molmo_path):
-        molmo_path = resolve_model(molmo_path)
+    def load(self):
+        molmo_path = resolve_model()
         return (MolmoProjectedCLIP(resolve_molmo_python(), molmo_path, resolve_projector(molmo_path)),)
 
 

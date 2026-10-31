@@ -18,7 +18,7 @@ python -m venv molmo-env
 molmo-env/bin/python -m pip install -r ComfyUI-Molmo2-H3/requirements-molmo.txt
 ```
 
-On Windows use `molmo-env\Scripts\python.exe`. Download the complete HF package into `ComfyUI/models/text_encoders/Molmo2-8B-Minimax-H3/`, restart ComfyUI and add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`). The node has one input: select the Molmo2 package in the `molmo_path` dropdown. It finds the separate projector in that package and returns a `CLIP` output. Configure the ComfyUI service's `HENGE_MOLMO_PYTHON` environment variable once to point to the separate Molmo Python; it is an installation setting, not a per-workflow input.
+On Windows use `molmo-env\Scripts\python.exe`. Add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`); it has no inputs and returns a `CLIP` output. On first use it downloads the public INT8 package and separate projector from `Alissonerdx/Molmo2-8B-Minimax-H3` into `ComfyUI/models/text_encoders/Molmo2-8B-Minimax-H3/` (about 9.7 GB; later loads use the local copy). The machine needs internet access and enough disk space. Configure the ComfyUI service's `HENGE_MOLMO_PYTHON` environment variable once to point to the separate Molmo Python runtime; this installation setting is not a workflow input.
 
 Remove the previous standalone `comfyui_molmo_h3` custom-node installation before enabling this package, so the same node ID is not registered twice. The folder inside the downloaded HF model is an alternative copy of this node, not a second required installation.
 
