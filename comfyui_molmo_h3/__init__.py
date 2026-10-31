@@ -12,6 +12,7 @@ import tempfile
 import threading
 
 import torch
+from .model_paths import model_choices, resolve_model
 import folder_paths
 import comfy.model_management as mm
 
@@ -98,6 +99,26 @@ class MolmoServer:
                 except Exception:
                     pass
             return res
+
+
+    def generate(self, prompt, visuals, max_new_tokens=1024, max_video_frames=8):
+        import numpy as np
+        with self.lock, tempfile.TemporaryDirectory(prefix='molmo-answer-') as folder:
+            items=[]
+            for i,item in enumerate(visuals):
+                path=os.path.join(folder,f'{i}.npy')
+                data=item['data'].detach().cpu()
+                np.save(path,(data.clamp(0,1)*255).round().to(torch.uint8).numpy())
+                items.append({'type':item['type'],'path':path,'timestamps':item.get('timestamps',[])})
+            out=os.path.join(folder,'answer.json')
+            self.proc.stdin.write(json.dumps({'mode':'generate','prompt':prompt,'visuals':items,
+                'out':out,'max_new_tokens':max_new_tokens,'max_video_frames':max_video_frames})+'\n')
+            self.proc.stdin.flush()
+            reply=self.proc.stdout.readline().strip()
+            if not reply.startswith('OK '):raise RuntimeError('Molmo2 failed: '+reply)
+            with open(out) as f:result=json.load(f)
+            self.proc.terminate();self.proc.wait(timeout=10)
+            return result
 
 
 class MolmoProjectedCLIP:
@@ -194,19 +215,26 @@ class MolmoProjectedCLIP:
 class MolmoH3EncoderLoader:
     @classmethod
     def INPUT_TYPES(cls):
-        return {'required': {'molmo_path': ('STRING', {'default': os.environ.get('HENGE_MOLMO_MODEL', '')}),
+        return {'required': {'molmo_path': (model_choices(),),
                              'projection': (['bundled_default'] + folder_paths.get_filename_list('clip_projections'),),
                              'molmo_python': ('STRING', {'default': os.environ.get('HENGE_MOLMO_PYTHON', '')})},
                 'optional': {'phase_b_vision': ('BOOLEAN', {'default': False}),
                              'phase_b_max_frames': ('INT', {'default': 8, 'min': 1, 'max': 64}),
                              'source_person_photo': ('IMAGE',), 'source_guide': ('IMAGE',),
                              'source_guide_fps': ('FLOAT', {'default':24.,'min':.1,'max':120.})}}
-    RETURN_TYPES = ('CLIP',); FUNCTION = 'load'; CATEGORY = 'Henge/experimental'
+    @classmethod
+    def VALIDATE_INPUTS(cls, molmo_path):
+        try:
+            resolve_model(molmo_path)
+            return True
+        except ValueError as exc:
+            return str(exc)
+
+    RETURN_TYPES = ('CLIP',); FUNCTION = 'load'; CATEGORY = 'Molmo2/H3'
 
     def load(self, molmo_path, projection, molmo_python, phase_b_vision=False, phase_b_max_frames=8,
              source_person_photo=None, source_guide=None, source_guide_fps=24.):
-        if not os.path.isfile(os.path.join(molmo_path, 'tokenizer.json')):
-            raise ValueError('molmo_path must be a Molmo2-8B checkpoint folder with tokenizer.json')
+        molmo_path = resolve_model(molmo_path)
         if not os.path.isfile(molmo_python):
             raise ValueError('molmo_python must be the Python of the Molmo2 environment (HENGE_MOLMO_PYTHON)')
         if projection == 'bundled_default':
@@ -222,3 +250,6 @@ class MolmoH3EncoderLoader:
 
 NODE_CLASS_MAPPINGS = {'MolmoH3EncoderLoader': MolmoH3EncoderLoader}
 NODE_DISPLAY_NAME_MAPPINGS = {'MolmoH3EncoderLoader': 'Molmo2 as H3 encoder (projection, experimental)'}
+
+from .nodes import NODE_CLASS_MAPPINGS as _reference_nodes
+NODE_CLASS_MAPPINGS.update(_reference_nodes)

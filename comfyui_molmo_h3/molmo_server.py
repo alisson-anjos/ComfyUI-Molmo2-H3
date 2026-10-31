@@ -16,6 +16,7 @@ import numpy as np
 import torch
 from transformers import AutoModelForImageTextToText, AutoProcessor
 from visual_inputs import prepare_inputs
+from generation import generation_inputs, response_points
 
 
 def main():
@@ -33,6 +34,20 @@ def main():
     for line in sys.stdin:
         try:
             request = json.loads(line)
+            if request.get('mode') == 'generate':
+                if processor is None:
+                    processor = AutoProcessor.from_pretrained(sys.argv[1], trust_remote_code=True)
+                batch, presentation = generation_inputs(processor, request['prompt'], request.get('visuals', []), request.get('max_video_frames', 8))
+                model.to('cuda'); batch = batch.to('cuda')
+                with torch.inference_mode():
+                    seq = model.generate(**batch, max_new_tokens=request.get('max_new_tokens', 1024), do_sample=False)
+                answer = processor.tokenizer.decode(seq[0, batch['input_ids'].shape[1]:], skip_special_tokens=True)
+                result = {'text':answer, 'points':response_points(answer,presentation)}
+                with open(request['out'],'w') as f:json.dump(result,f)
+                del batch, seq
+                model.to('cpu');torch.cuda.empty_cache()
+                print('OK '+request['out'],flush=True)
+                continue
             offset = 0
             if request.get('visuals'):
                 if processor is None:

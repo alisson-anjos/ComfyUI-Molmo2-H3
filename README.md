@@ -18,7 +18,7 @@ python -m venv molmo-env
 molmo-env/bin/python -m pip install -r ComfyUI-Molmo2-H3/requirements-molmo.txt
 ```
 
-On Windows use `molmo-env\Scripts\python.exe`. Download the complete HF package, restart ComfyUI and add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`). Set `molmo_path` to the downloaded folder and `molmo_python` to the separate environment's executable. Select `bundled_default` to find the separate projector under `projections/`; or install another projector in `models/clip_projections/` and select it explicitly.
+On Windows use `molmo-env\Scripts\python.exe`. Download the complete HF package into `ComfyUI/models/text_encoders/Molmo2-8B-Minimax-H3/`, restart ComfyUI and add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`). Select `Molmo2-8B-Minimax-H3/molmo2_8b_int8_convrot.safetensors` in the `molmo_path` dropdown and set `molmo_python` to the separate environment's executable. Select `bundled_default` to find the separate projector under `projections/`; or install another projector in `models/clip_projections/` and select it explicitly.
 
 Remove the previous standalone `comfyui_molmo_h3` custom-node installation before enabling this package, so the same node ID is not registered twice. The folder inside the downloaded HF model is an alternative copy of this node, not a second required installation.
 
@@ -27,6 +27,17 @@ Remove the previous standalone `comfyui_molmo_h3` custom-node installation befor
 Connect the loader's **CLIP** output to MiniMax H3's text/reference conditioning CLIP input. Native H3 VAE reference inputs continue to supply replacement appearance. Optional visual mode sends reference images and timestamped guide frames to Molmo before projecting text-suffix hidden states.
 
 For source-photo experiments, connect the original-person photo to `source_person_photo` and original video frames to `source_guide`. Put the replacement photo in H3's ordinary reference input. These are separate roles. No SAM or edit mask is introduced by this loader. See `examples/loader_api.json` for the loader configuration; it is a fragment to insert into an existing H3 API workflow, not a standalone video generator.
+
+## Reference, analysis and tracking nodes
+
+- **MiniMax H3 Reference to Video (Molmo2)** accepts the same inputs as the native H3 node and returns `positive` and `latent`. Connect the projected Molmo loader to `clip`. It enables visual encoding for that request without changing the loader object.
+- **Molmo2 Analyze References / Points** generates Molmo's text response, timestamped `points` JSON and a `sam_prompt` string. Pictures and video batches use the native reference names. Analysis consumes images/video only; it does not use a VAE or generate H3 video. Ask explicitly which character or animal to locate. The SAM prompt is editable text extracted from the response, not guaranteed to be a concise SAM instruction.
+- **Molmo2 Draw Video Points** overlays the returned points on the corresponding sampled frames. Connect its IMAGE output to a video saver. It does not interpolate missing observations.
+- **Molmo2 Points to SAM 3.1 Track** takes those points, the original video frames and the native SAM checkpoint's MODEL output. It segments the object under an observed point, then propagates forward and backward within each supplied cut boundary. It returns a union `mask`, a tinted `preview`, and a `report`. Select one `object_id` for a separate target mask, or 0 for all IDs.
+
+For optional text assistance, connect `sam_prompt` to **CLIP Text Encode** using the SAM checkpoint's CLIP, then pass that conditioning to `sam_conditioning`. The projected Molmo CLIP is for H3, not SAM. Failed seeds are reported and remain empty. Install the SAM 3.1 checkpoint separately through ComfyUI's normal checkpoint loader.
+
+Use the same video, frame rate and frame order for analysis, point drawing and SAM. `video_index` selects the corresponding reference video. Points cover only sampled frames; SAM supplies the intervening segmentation. IDs belong to one analysis request and are not global identities. Provide camera cuts through `cut_frames` when needed: this node does not detect cuts automatically or guarantee identity recovery after occlusion. The SAM outputs are optional and are not inserted into H3 conditioning.
 
 ## Limits and validation
 

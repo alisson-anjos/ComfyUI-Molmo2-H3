@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 - 2026-10-31
+
+- Discover complete Molmo packages from the `text_encoders` dropdown; retain existing absolute-folder calls.
+- Add native H3 Reference to Video conditioning with Molmo visual encoding and unchanged positive/latent outputs.
+- Add native Molmo text/point responses, observed-point overlays and optional point-seeded SAM 3.1 video tracking. Text assistance uses the SAM checkpoint's own CLIP.
+- Validation: ten CPU tests cover native schema parity, point/time/reference mapping, drawing, SAM seeding in both directions, cut boundaries and missed seeds. A live SAM 3.1 point-seeding/tracking test passed on five boxing frames; the native Molmo response-server test also returned a valid timestamped target point. Crossings, occlusion and reference-based identity selection remain experimental.
+- Publication: source release 0.2.0; registry availability depends on the publishing workflow.
+
 ## 0.1.0 - 2026-10-31
 
 - Export the complete INT8 model as a single `molmo2_8b_int8_convrot.safetensors` file, keeping the projector separate.
