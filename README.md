@@ -11,14 +11,7 @@ git clone https://github.com/alisson-anjos/ComfyUI-Molmo2-H3.git
 python -m pip install -r ComfyUI-Molmo2-H3/requirements.txt
 ```
 
-Use a separate Python environment for Molmo, so its Transformers version does not replace ComfyUI's:
-
-```bash
-python -m venv molmo-env
-molmo-env/bin/python -m pip install -r ComfyUI-Molmo2-H3/requirements-molmo.txt
-```
-
-On Windows use `molmo-env\Scripts\python.exe`. Add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`); it has no inputs and returns a `CLIP` output. It downloads missing files from the public INT8 package at `Alissonerdx/Molmo2-8B-Minimax-H3` into `ComfyUI/models/text_encoders/Molmo2-8B-Minimax-H3/` and keeps files already present. A fresh install needs about 9.7 GB; if only the projector is missing, it downloads only that projector. Configure the ComfyUI service's `HENGE_MOLMO_PYTHON` environment variable once to point to the separate Molmo Python runtime; this installation setting is not a workflow input.
+Add **Molmo2 as H3 encoder (projection, experimental)** (`MolmoH3EncoderLoader`); it has no inputs and returns a `CLIP` output. It uses ComfyUI's own Python and model folders. The node downloads missing files from the public INT8 package at `Alissonerdx/Molmo2-8B-Minimax-H3` into `ComfyUI/models/text_encoders/Molmo2-8B-Minimax-H3/`, keeping files already present. A fresh install needs about 9.7 GB; if only the projector is missing, it downloads only that projector. The custom ConvRot loader handles the single `.safetensors` model file and the separate projector.
 
 Remove the previous standalone `comfyui_molmo_h3` custom-node installation before enabling this package, so the same node ID is not registered twice. The folder inside the downloaded HF model is an alternative copy of this node, not a second required installation.
 

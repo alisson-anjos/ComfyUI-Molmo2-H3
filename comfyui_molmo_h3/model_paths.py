@@ -93,10 +93,5 @@ def resolve_projector(model):
 
 
 def resolve_molmo_python():
-    """Find the isolated Molmo runtime without exposing implementation settings on the node."""
-    candidates = [os.environ.get('HENGE_MOLMO_PYTHON'), os.environ.get('MOLMO_H3_PYTHON'),
-                  '/opt/molmo/bin/python', sys.executable]
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file():
-            return candidate
-    raise ValueError('Molmo2 runtime is unavailable; configure HENGE_MOLMO_PYTHON for the ComfyUI service')
+    """Run the Molmo worker with the same Python installation as ComfyUI."""
+    return sys.executable

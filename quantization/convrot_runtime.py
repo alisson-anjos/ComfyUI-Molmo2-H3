@@ -50,6 +50,20 @@ def load_model(folder, device='cuda'):
     from accelerate import init_empty_weights
     from transformers import AutoConfig, AutoModelForImageTextToText
     from safetensors.torch import load_file
+    from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+
+    # Molmo2's remote modeling code targets Transformers 4.x and asks for the
+    # standard `default` RoPE initializer. Transformers 5.x removed that entry
+    # from its registry, although the standard formula is unchanged.
+    if 'default' not in ROPE_INIT_FUNCTIONS:
+        def default_rope(config, device=None, seq_len=None):
+            base = getattr(config, 'rope_theta', 10000.0)
+            head_dim = getattr(config, 'head_dim', None) or config.hidden_size // config.num_attention_heads
+            dim = int(head_dim * getattr(config, 'partial_rotary_factor', 1.0))
+            exponent = torch.arange(0, dim, 2, dtype=torch.int64, device=device).float() / dim
+            return 1.0 / (base ** exponent), 1.0
+        ROPE_INIT_FUNCTIONS['default'] = default_rope
+
     folder = Path(folder)
     manifest = json.loads((folder/'convrot_config.json').read_text())
     if manifest.get('format') != 'molmo2-convrot-int8-v1':
