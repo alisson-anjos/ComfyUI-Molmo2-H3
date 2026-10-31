@@ -4,8 +4,9 @@ from dataclasses import replace
 import torch
 from comfy_api.latest import io
 from comfy_extras.nodes_minimax_h3 import MiniMaxH3ReferenceToVideo,_resize
+from comfy_extras.nodes_textgen import TextGenerate
 import comfy.model_management as mm
-from . import MolmoProjectedCLIP
+from . import MolmoProjectedCLIP,MolmoServer
 from .generation import prompt_with_point_contract
 
 
@@ -13,6 +14,53 @@ def molmo_clip(clip):
     if not isinstance(clip,MolmoProjectedCLIP):raise ValueError('Connect the Molmo2 H3 encoder loader CLIP output')
     local=copy.copy(clip);local.phase_b_vision=True
     return local
+
+
+def generate_molmo(clip,prompt,visuals,max_new_tokens=1024,**sampling):
+    if not isinstance(clip,MolmoProjectedCLIP):raise ValueError('Connect Molmo2 as H3 encoder (projection, experimental)')
+    mm.unload_all_models();mm.soft_empty_cache()
+    return MolmoServer.get(clip.python,clip.model).generate(
+        prompt,visuals,max_new_tokens,clip.phase_b_max_frames,**sampling)
+
+
+class Molmo2TextGenerate(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        # Keep the native ComfyUI Generate Text controls and port order in sync.
+        # Execution below is independent: this node sends directly to Molmo2.
+        return replace(TextGenerate.define_schema(),node_id='Molmo2TextGenerate',
+            display_name='Molmo2 Generate Text',category='Molmo2/Analysis',
+            description='Standalone Molmo2 text/image/video generation with the native Generate Text interface. It does not connect to or execute through the native Generate Text node.')
+
+    @classmethod
+    def execute(cls,clip,prompt,max_length,sampling_mode,image=None,thinking=False,use_default_template=True,
+                video=None,audio=None,mtp='auto',system_prompt=''):
+        if audio is not None:
+            raise ValueError('Molmo2 Generate Text currently supports text, images, and video; audio input is not supported by this Molmo2 checkpoint.')
+        visuals=[]
+        if image is not None:
+            visuals.extend({'type':'image','data':image[i:i+1]} for i in range(len(image)))
+        if video is not None and len(video):
+            visuals.append({'type':'video','data':video,'timestamps':[i/24. for i in range(len(video))]})
+        text=prompt
+        if thinking:text='Think carefully through the visual evidence before answering.\n\n'+text
+        # Molmo2 uses its processor's required chat template. The native toggle
+        # controls only its optional system template; system_prompt is ignored
+        # when the user disables that template.
+        sampling_mode=sampling_mode or {}
+        do_sample=sampling_mode.get('sampling_mode')=='on'
+        answer=generate_molmo(clip,text,visuals,max_length,do_sample=do_sample,
+            temperature=sampling_mode.get('temperature',.7),top_k=sampling_mode.get('top_k',64),
+            top_p=sampling_mode.get('top_p',.95),min_p=sampling_mode.get('min_p',.05),
+            repetition_penalty=sampling_mode.get('repetition_penalty',1.05),
+            seed=sampling_mode.get('seed'),presence_penalty=sampling_mode.get('presence_penalty',0.),
+            system_prompt=(system_prompt or '') if use_default_template else '')
+        generated=answer['text'];reasoning,sep,result=generated.partition('</think>')
+        if not sep:
+            if generated.lstrip().startswith('<think>'):
+                reasoning,result=generated.split('<think>',1)[1],''
+            else:reasoning,result='',generated
+        return io.NodeOutput(result.strip(),reasoning.replace('<think>','',1).strip())
 
 
 def points_data(value,video_index=1,object_id=0):
@@ -75,9 +123,8 @@ class MolmoH3AnalyzeReferences(io.ComfyNode):
             h,w=frames.shape[1:3];scale=min(1.,math.sqrt(width*height/(w*h)))
             selected=_resize(frames[ids],max(32,round(w*scale/32)*32),max(32,round(h*scale/32)*32),'disabled')
             visuals.append({'type':'video','data':selected,'timestamps':[int(i)/clip.source_guide_fps for i in ids]})
-        mm.unload_all_models();mm.soft_empty_cache()
         request=prompt_with_point_contract(prompt,visuals)
-        answer=clip.generate_prompt(request,visuals,max_new_tokens)
+        answer=generate_molmo(clip,request,visuals,max_new_tokens,do_sample=False)
         points=answer['points']
         response=answer['text']
         point_request=request != prompt
@@ -147,4 +194,4 @@ class MolmoH3SAM3Track(io.ComfyNode):
         return io.NodeOutput(mask.float(),preview,json.dumps(report))
 
 
-NODE_CLASS_MAPPINGS={c.__name__:c for c in [MolmoH3ReferenceToVideo,MolmoH3AnalyzeReferences,MolmoH3DrawPoints,MolmoH3SAM3Track]}
+NODE_CLASS_MAPPINGS={c.__name__:c for c in [MolmoH3ReferenceToVideo,Molmo2TextGenerate,MolmoH3AnalyzeReferences,MolmoH3DrawPoints,MolmoH3SAM3Track]}

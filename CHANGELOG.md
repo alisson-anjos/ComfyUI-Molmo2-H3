@@ -1,8 +1,14 @@
 # Changelog
 
+## 0.4.4 - 2026-10-31
+
+- Add a standalone Molmo2 Generate Text node with the same input/output schema and ordering as ComfyUI's built-in node. It executes Molmo generation directly rather than routing through the built-in node. Molmo2 accepts text, image, and video inputs; audio is rejected clearly, and MTP has no effect without MTP weights. The Analyze References / Points node shares the same Molmo inference helper.
+- Validation: Python syntax and diff checks passed; live generation in ComfyUI remains pending a manual restart and GPU run.
+- Publication: local changes only; not pushed or published.
+
 ## 0.4.3 - 2026-10-31
 
-- Implement ComfyUI's native CLIP `tokenize` / `generate` / `decode` contract so the projected Molmo encoder connects directly to the built-in Generate Text node with text, image and video inputs. The analysis node now reuses that same generation path; native sampling controls are forwarded to Molmo.
+- Add initial projected-CLIP text-generation entry points; superseded in 0.4.4 by a standalone Molmo2 Generate Text node that does not depend on the built-in node.
 - Report invalid or empty model-generation outputs with a traceback instead of failing later with an opaque `NoneType` error.
 - Validation: source syntax and patch formatting checked; end-to-end Generate Text inference remains pending a manual ComfyUI restart and GPU run.
 - Publication: source version 0.4.3 pushed to `main`; registry package was not published.

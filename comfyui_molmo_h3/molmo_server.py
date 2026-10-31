@@ -74,7 +74,8 @@ def main():
                 if processor is None:
                     prepare_processor_compatibility()
                     processor = AutoProcessor.from_pretrained(sys.argv[1], trust_remote_code=True)
-                batch, presentation = generation_inputs(processor, request['prompt'], request.get('visuals', []), request.get('max_video_frames', 8))
+                batch, presentation = generation_inputs(processor, request['prompt'], request.get('visuals', []),
+                    request.get('max_video_frames', 8), (request.get('sampling') or {}).get('system_prompt', ''))
                 model.to('cuda'); batch = batch.to('cuda')
                 sampling = request.get('sampling') or {}
                 options = {'max_new_tokens': request.get('max_new_tokens', 1024),
