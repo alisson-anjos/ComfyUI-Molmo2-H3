@@ -34,7 +34,7 @@ The included projector was trained with floating-point Molmo hidden states. Its 
 
 The original Qwen32B text-encoder weights/tokenizer are not needed when using this Molmo loader. The H3 base model, VAE, task LoRAs and native H3 nodes are separate. This is an alternative encoder, not a complete H3 installation. If the Molmo server is left warm in text-only mode, its GPU memory remains occupied until the process exits. Visual requests offload and terminate the subprocess after encoding.
 
-A [native BF16/INT8 tracking comparison](https://huggingface.co/Alissonerdx/Molmo2-8B-Minimax-H3/tree/main/validation/tracking) is available: red-target coordinates are close, but requesting the black-shorts performer fails strict target selection in both variants.
+A [native BF16/INT8 tracking comparison](https://huggingface.co/Alissonerdx/Molmo2-8B-Minimax-H3/tree/main/validation/tracking) is available: a short target description failed selection, while explicit shorts/gloves descriptions selected each requested performer in both variants on the same clip.
 
 ## License
 

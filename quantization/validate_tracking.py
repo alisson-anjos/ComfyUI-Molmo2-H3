@@ -5,7 +5,7 @@ import torch
 from transformers import AutoProcessor,AutoModelForImageTextToText
 from molmo_utils import process_vision_info
 
-p=argparse.ArgumentParser();p.add_argument('--model',required=True);p.add_argument('--video',required=True);p.add_argument('--out',required=True);p.add_argument('--variant',required=True)
+p=argparse.ArgumentParser();p.add_argument('--model',required=True);p.add_argument('--video',required=True);p.add_argument('--out',required=True);p.add_argument('--variant',required=True);p.add_argument('--contrastive',action='store_true')
 a=p.parse_args();torch.set_num_threads(8)
 folder=Path(a.model);out=Path(a.out);out.mkdir(parents=True,exist_ok=True)
 if (folder/'convrot_config.json').exists():
@@ -16,6 +16,9 @@ else:
 processor=AutoProcessor.from_pretrained(folder,trust_remote_code=True,local_files_only=True)
 results=[]
 for target,query in [('red','Track the man wearing red shorts.'),('black','Track the man wearing black shorts.')]:
+ if a.contrastive:
+  other='black' if target=='red' else 'red'
+  query=f'Track only the boxer wearing {target} shorts and {target} gloves. Do not track the boxer wearing {other} shorts and {other} gloves.'
  messages=[{'role':'user','content':[dict(type='text',text=query),dict(type='video',video=a.video,max_fps=8)]}]
  _,videos,kw=process_vision_info(messages);videos,metadata=zip(*videos)
  text=processor.apply_chat_template(messages,tokenize=False,add_generation_prompt=True)
