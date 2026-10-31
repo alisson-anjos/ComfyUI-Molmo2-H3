@@ -34,10 +34,6 @@ The included projector was trained with floating-point Molmo hidden states. Its 
 
 The H3 base model, VAE, task LoRAs and native H3 nodes are separate. This is an alternative encoder, not a complete H3 installation. If the Molmo server is left warm in text-only mode, its GPU memory remains occupied until the process exits. Visual requests offload and terminate the subprocess after encoding.
 
-## Release
-
-Publishing follows [ComfyUI-BFSNodes](https://github.com/alisson-anjos/ComfyUI-BFSNodes): pushes changing `pyproject.toml` on main/master, or manual workflow dispatch, call `Comfy-Org/publish-node-action@v1` with publisher `alisson-anjos`. Configure the repository secret `REGISTRY_ACCESS_TOKEN` to enable publication. GitHub does not permit reading an existing repository secret back to copy its value. Without that secret the workflow reports a notice and skips registry publication.
-
 ## License
 
 Apache 2.0. Ai2's original Molmo weights/code and their notices are distributed in the HF package. This community integration is not an official Ai2 or MiniMax release.
