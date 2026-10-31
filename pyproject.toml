@@ -1,0 +1,18 @@
+[project]
+name = "comfyui-molmo2-h3"
+description = "Experimental Molmo2-8B encoder for MiniMax H3 with separate projectors and standalone INT8 ConvRot loading."
+version = "0.1.0"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+dependencies = ["torch", "numpy", "safetensors", "tokenizers"]
+
+[project.urls]
+Repository = "https://github.com/alisson-anjos/ComfyUI-Molmo2-H3"
+Documentation = "https://github.com/alisson-anjos/ComfyUI-Molmo2-H3#readme"
+"Bug Tracker" = "https://github.com/alisson-anjos/ComfyUI-Molmo2-H3/issues"
+
+[tool.comfy]
+PublisherId = "alisson-anjos"
+DisplayName = "ComfyUI-Molmo2-H3"
+Icon = ""
+includes = []

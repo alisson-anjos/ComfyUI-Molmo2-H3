@@ -1,0 +1,9 @@
+torch>=2.5
+transformers==4.57.1
+accelerate
+safetensors
+pillow
+numpy
+einops
+molmo_utils
+huggingface_hub
