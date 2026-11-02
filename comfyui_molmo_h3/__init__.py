@@ -1,25 +1,77 @@
 """Molmo2 as the MiniMax H3 text encoder, through a calibrated projection (experimental).
 
 A ClipProj-style projection (https://github.com/nicolab28/ComfyUI-ClipProj, MIT; same file format and maths) maps
-Molmo2-8B's hidden states to the conditioning H3's 32B Qwen3-VL encoder produces. Molmo2 runs in its own Python,
-started once and kept warm. Phase A covers text: reference pictures and videos keep their native H3 latent path, and
+Molmo2-8B's hidden states to the conditioning H3's 32B Qwen3-VL encoder produces. The model is loaded in-process
+through ComfyUI's model manager. The projected CLIP is used for H3 conditioning; the separate Molmo2 Generate Text
+node handles generation. Phase A covers text: reference pictures and videos keep their native H3 latent path, and
 only their <Picture N>/<Video N> labels reach Molmo2.
 """
-import json
+import importlib.util
 import os
-import subprocess
-import tempfile
 import threading
+from types import MethodType
+import inspect
+from contextlib import contextmanager
 
 import torch
-from .model_paths import resolve_model, resolve_projector, resolve_molmo_python
+from .model_paths import resolve_model, resolve_projector
 import folder_paths
 import comfy.model_management as mm
 
 PROJECTIONS = os.path.join(folder_paths.models_dir, 'clip_projections')
 os.makedirs(PROJECTIONS, exist_ok=True)
 folder_paths.add_model_folder_path('clip_projections', PROJECTIONS)
-SERVER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'molmo_server.py')
+
+
+def prepare_processor_compatibility():
+    from transformers.processing_utils import ProcessorMixin
+    original_init = ProcessorMixin.__init__
+    if getattr(original_init, '_molmo2_compat', False):
+        return
+    option_names = ('image_use_col_tokens', 'use_single_crop_col_tokens', 'use_single_crop_start_token',
+                    'video_use_col_tokens', 'use_frame_special_tokens')
+    def compatible_init(self, *args, **kwargs):
+        if self.__class__.__name__ != 'Molmo2Processor':
+            return original_init(self, *args, **kwargs)
+        options = {name: kwargs.pop(name) for name in option_names if name in kwargs}
+        result = original_init(self, *args, **kwargs)
+        for name, value in options.items():
+            setattr(self, name, value)
+        return result
+    compatible_init._molmo2_compat = True
+    ProcessorMixin.__init__ = compatible_init
+
+
+def prepare_generation_compatibility(model):
+    from transformers.masking_utils import create_causal_mask
+    import sys
+    module = sys.modules.get(model.__class__.__module__)
+    try:
+        params = inspect.signature(create_causal_mask).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if module is not None and hasattr(module, 'create_causal_mask') and 'inputs_embeds' in params and 'input_embeds' not in params:
+        def compatible_mask(config, input_embeds=None, **kwargs):
+            kwargs.pop('cache_position', None)
+            return create_causal_mask(config=config, inputs_embeds=input_embeds, **kwargs)
+        module.create_causal_mask = compatible_mask
+    original = model.prepare_inputs_for_generation
+    if getattr(original, '_molmo2_cache_position_compat', False):
+        return
+    def compatible_prepare(self, input_ids, *args, **kwargs):
+        if kwargs.get('cache_position') is None:
+            cache = kwargs.get('past_key_values')
+            try:
+                past = int(cache.get_seq_length()) if cache is not None else 0
+            except (AttributeError, TypeError, ValueError):
+                past = 0
+            length = kwargs.get('next_sequence_length')
+            if length is None:
+                length = input_ids.shape[-1] if past == 0 else max(1, input_ids.shape[-1] - past)
+            kwargs['cache_position'] = torch.arange(past, past + int(length), device=input_ids.device)
+        return original(input_ids, *args, **kwargs)
+    compatible_prepare._molmo2_cache_position_compat = True
+    model.prepare_inputs_for_generation = MethodType(compatible_prepare, model)
 
 
 def load_projection(path):
@@ -51,83 +103,144 @@ def build_residual(proj, device):
     return net
 
 
-class MolmoServer:
-    """One warm Molmo2 process per (python, model)."""
+class MolmoRuntime:
+    """Molmo2 loaded as a ComfyUI-managed model in this process."""
     _instances = {}
     _lock = threading.Lock()
 
     @classmethod
-    def get(cls, python, model):
+    def get(cls, model_path):
         with cls._lock:
-            server = cls._instances.get((python, model))
-            if server is None or server.proc.poll() is not None:
-                server = cls._instances[(python, model)] = cls(python, model)
-            return server
+            runtime = cls._instances.get(model_path)
+            if runtime is None:
+                runtime = cls._instances[model_path] = cls(model_path)
+            return runtime
 
-    def __init__(self, python, model):
-        self.proc = subprocess.Popen([python, SERVER, model], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
-        for line in self.proc.stdout:
-            if line.startswith('READY'):
-                break
-        else:
-            raise RuntimeError('Molmo2 server exited before it was ready')
+    def __init__(self, model_path):
+        self.model_path = model_path
+        self.model = None
+        self.patcher = None
+        self.processor = None
         self.lock = threading.Lock()
 
+    def load(self):
+        if self.model is not None:
+            return
+        from transformers import AutoProcessor
+        import comfy.model_patcher
+        runtime_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'quantization', 'convrot_runtime.py')
+        spec = importlib.util.spec_from_file_location('molmo_h3_convrot_runtime', runtime_path)
+        runtime_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime_module)
+        load_model = runtime_module.load_model
+        hf_model = load_model(self.model_path, device='cpu')
+        prepare_generation_compatibility(hf_model)
+        prepare_processor_compatibility()
+        processor = AutoProcessor.from_pretrained(self.model_path, trust_remote_code=True)
+        model = MolmoComfyModel(hf_model)
+        self.patcher = comfy.model_patcher.ModelPatcher(
+            model, load_device=mm.get_torch_device(), offload_device=mm.text_encoder_offload_device(),
+            size=mm.module_size(model))
+        self.model = model
+        self.processor = processor
+
+    def _load_gpu(self):
+        self.load()
+        mm.load_models_gpu([self.patcher], force_full_load=True)
+        return self.model, self.processor, mm.get_torch_device()
+
+    @contextmanager
+    def _gpu_model(self):
+        try:
+            yield self._load_gpu()
+        finally:
+            if self.patcher is not None:
+                mm.unload_model_and_clones(self.patcher)
+
     def hidden(self, ids, tap, visuals=None, max_video_frames=8):
-        with self.lock, tempfile.TemporaryDirectory(prefix='molmo-h3-') as folder:
-            import numpy as np
-            items = []
-            for n, item in enumerate(visuals or []):
-                data = item['data'].detach().cpu()
-                path = os.path.join(folder, f'visual_{n}.npy')
-                np.save(path, (data.clamp(0, 1) * 255).round().to(torch.uint8).numpy())
-                items.append({'type': item['type'], 'path': path,
-                              'timestamps': item.get('timestamps', [])})
-            out = os.path.join(folder, 'h.npy')
-            self.proc.stdin.write(json.dumps({'ids': ids, 'tap': tap, 'out': out, 'visuals': items,
-                                              'offload_after': bool(items),
-                                              'max_video_frames': max_video_frames}) + '\n'); self.proc.stdin.flush()
-            reply = self.proc.stdout.readline().strip()
-            if not reply.startswith('OK '):
-                raise RuntimeError('Molmo2 failed: ' + reply)
-            import numpy as np
-            res = torch.from_numpy(np.load(out))
-            if items:
-                try:
-                    self.proc.terminate()
-                    self.proc.wait(timeout=5)
-                except Exception:
-                    pass
-            return res
+        from .visual_inputs import prepare_inputs
+        with self.lock, self._gpu_model() as (model, processor, device):
+            if visuals:
+                inputs, offset = prepare_inputs(processor, ids, visuals, max_video_frames)
+                inputs = inputs.to(device)
+            else:
+                offset = 0
+                tokens = torch.tensor([ids], device=device)
+                inputs = {'input_ids': tokens, 'attention_mask': torch.ones_like(tokens)}
+            with torch.inference_mode():
+                output = model(**inputs, output_hidden_states=True, use_cache=False, logits_to_keep=1)
+            hidden = output.hidden_states[int(tap)][0, offset:]
+            if hidden.shape[0] != len(ids):
+                raise RuntimeError('Molmo2 visual/text alignment failed')
+            return hidden.float().to('cpu', dtype=torch.float16)
 
 
-    def generate(self, prompt, visuals, max_new_tokens=1024, max_video_frames=8):
-        import numpy as np
-        with self.lock, tempfile.TemporaryDirectory(prefix='molmo-answer-') as folder:
-            items=[]
-            for i,item in enumerate(visuals):
-                path=os.path.join(folder,f'{i}.npy')
-                data=item['data'].detach().cpu()
-                np.save(path,(data.clamp(0,1)*255).round().to(torch.uint8).numpy())
-                items.append({'type':item['type'],'path':path,'timestamps':item.get('timestamps',[])})
-            out=os.path.join(folder,'answer.json')
-            self.proc.stdin.write(json.dumps({'mode':'generate','prompt':prompt,'visuals':items,
-                'out':out,'max_new_tokens':max_new_tokens,'max_video_frames':max_video_frames})+'\n')
-            self.proc.stdin.flush()
-            reply=self.proc.stdout.readline().strip()
-            if not reply.startswith('OK '):raise RuntimeError('Molmo2 failed: '+reply)
-            with open(out) as f:result=json.load(f)
-            self.proc.terminate();self.proc.wait(timeout=10)
-            return result
+    def generate(self, prompt, visuals, max_new_tokens=1024, max_video_frames=8, **sampling):
+        from .generation import generation_inputs, response_points
+        with self.lock, self._gpu_model() as (model, processor, device):
+            batch, presentation = generation_inputs(processor, prompt, visuals, max_video_frames,
+                                                     sampling.pop('system_prompt', ''))
+            batch = batch.to(device)
+            options = {'max_new_tokens': max_new_tokens, 'do_sample': bool(sampling.pop('do_sample', False)),
+                       'repetition_penalty': max(1e-5, float(sampling.pop('repetition_penalty', 1.05)))}
+            if options['do_sample']:
+                options.update(temperature=max(1e-5, float(sampling.pop('temperature', .7))),
+                               top_k=int(sampling.pop('top_k', 64)), top_p=float(sampling.pop('top_p', .95)))
+                min_p = float(sampling.pop('min_p', .05))
+                if min_p > 0:
+                    from transformers.generation.logits_process import MinPLogitsWarper
+                    from transformers.generation.logits_process import LogitsProcessorList
+                    options['logits_processor'] = LogitsProcessorList([MinPLogitsWarper(min_p)])
+                presence = float(sampling.pop('presence_penalty', 0.))
+                if presence:
+                    from transformers.generation.logits_process import LogitsProcessor, LogitsProcessorList
+                    prompt_length = batch['input_ids'].shape[1]
+                    class PresencePenalty(LogitsProcessor):
+                        def __call__(self, input_ids, scores):
+                            for row in range(input_ids.shape[0]):
+                                seen = input_ids[row, prompt_length:].unique()
+                                if seen.numel():
+                                    scores[row, seen] -= presence
+                            return scores
+                    options['logits_processor'] = LogitsProcessorList(list(options.get('logits_processor', [])) + [PresencePenalty()])
+            seed = sampling.pop('seed', None)
+            with torch.inference_mode():
+                if seed is None:
+                    sequences = model.generate(**batch, **options)
+                else:
+                    with torch.random.fork_rng(devices=[device.index] if device.type == 'cuda' else []):
+                        torch.manual_seed(int(seed))
+                        if device.type == 'cuda': torch.cuda.manual_seed(int(seed))
+                        sequences = model.generate(**batch, **options)
+            if isinstance(sequences, dict):
+                sequences = sequences.get('sequences')
+            if sequences is None or sequences.shape[0] == 0:
+                raise RuntimeError('Molmo2 returned no generated tokens')
+            answer = processor.tokenizer.decode(sequences[0, batch['input_ids'].shape[1]:], skip_special_tokens=True)
+            return {'text': answer, 'points': response_points(answer, presentation)}
+
+
+class MolmoComfyModel(torch.nn.Module):
+    """Give the read-only HF model.device property a ComfyUI-managed wrapper."""
+    def __init__(self, model):
+        super().__init__()
+        self.transformer = model
+
+    def forward(self, *args, **kwargs):
+        return self.transformer(*args, **kwargs)
+
+    def generate(self, *args, **kwargs):
+        return self.transformer.generate(*args, **kwargs)
 
 
 class MolmoProjectedCLIP:
     """Answers the calls MiniMax H3 nodes make on a CLIP (tokenize / encode_from_tokens_scheduled)."""
 
-    def __init__(self, python, model, projection, phase_b_vision=False, phase_b_max_frames=8,
+    def __init__(self, model, projection, phase_b_vision=False, phase_b_max_frames=8,
                  source_person_photo=None, source_guide=None, source_guide_fps=24.):
         from tokenizers import Tokenizer
-        self.python, self.model, self.projection = python, model, projection
+        self.model, self.projection = model, projection
+        self.runtime = MolmoRuntime.get(model)
         self.tokenizer = Tokenizer.from_file(os.path.join(model, 'tokenizer.json'))
         self.proj = load_projection(projection)
         self.cache = {}
@@ -140,7 +253,7 @@ class MolmoProjectedCLIP:
     def clone(self):
         return self
 
-    def tokenize(self, text, return_word_ids=False, images=[], minimax_ref_items=None, **kwargs):
+    def tokenize(self, text, return_word_ids=False, images=None, minimax_ref_items=None, **kwargs):
         ids = []
         def add(s):
             ids.extend(self.tokenizer.encode(s, add_special_tokens=False).ids)
@@ -149,6 +262,7 @@ class MolmoProjectedCLIP:
             kind = item['type'];counters[kind] = counters.get(kind, 0) + 1
             # Phase A: only the label; the picture/video itself reaches H3 through its VAE latent.
             add({'image': '<Picture %d>: ', 'video': '<Video %d>: ', 'audio': '<Audio %d>: '}.get(kind, '<Picture %d>: ') % counters[kind])
+        images = images or []
         if not minimax_ref_items:
             for i, _ in enumerate(images):
                 add('<Picture %d>: ' % (i + 1))
@@ -173,10 +287,7 @@ class MolmoProjectedCLIP:
 
     def _encode(self, tokens):
         ids = [t[0] for t in tokens['molmo'][0]]
-        if tokens.get('molmo_visuals'):
-            mm.unload_all_models()
-            mm.soft_empty_cache()
-        h = MolmoServer.get(self.python, self.model).hidden(ids, self.proj['tap'], tokens.get('molmo_visuals'), self.phase_b_max_frames)
+        h = self.runtime.hidden(ids, self.proj['tap'], tokens.get('molmo_visuals'), self.phase_b_max_frames)
         device = mm.get_torch_device()
         if self.cache.get('device') != device:
             self.cache = {'device': device, 'p': {k: self.proj[k].to(device=device, dtype=torch.float32) for k in ('W', 'mean_in', 'std_in', 'mean_out', 'std_out') if k in self.proj},
@@ -221,7 +332,7 @@ class MolmoH3EncoderLoader:
 
     def load(self):
         molmo_path = resolve_model()
-        return (MolmoProjectedCLIP(resolve_molmo_python(), molmo_path, resolve_projector(molmo_path)),)
+        return (MolmoProjectedCLIP(molmo_path, resolve_projector(molmo_path)),)
 
 
 NODE_CLASS_MAPPINGS = {'MolmoH3EncoderLoader': MolmoH3EncoderLoader}

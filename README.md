@@ -34,9 +34,9 @@ Use the same video, frame rate and frame order for analysis, point drawing and S
 
 ## Limits and validation
 
-The included projector was trained with floating-point Molmo hidden states. Its INT8 compatibility and correct target selection in multi-person video remain experimental. Text/image inference, finite layer-24 states, subprocess loading and projector-path selection passed; these checks do not establish downstream H3 video quality, tracking accuracy or performance parity. The INT8 runtime is eager PyTorch with INT8 CUDA GEMM, not a fused optimized engine.
+The included projector was trained with floating-point Molmo hidden states. Its INT8 compatibility and correct target selection in multi-person video remain experimental. The INT8 runtime is eager PyTorch with INT8 CUDA GEMM, not a fused optimized engine.
 
-The original Qwen32B text-encoder weights/tokenizer are not needed when using this Molmo loader. The H3 base model, VAE, task LoRAs and native H3 nodes are separate. This is an alternative encoder, not a complete H3 installation. If the Molmo server is left warm in text-only mode, its GPU memory remains occupied until the process exits. Visual requests offload and terminate the subprocess after encoding.
+The original Qwen32B text-encoder weights/tokenizer are not needed when using this Molmo loader. The H3 base model, VAE, task LoRAs and native H3 nodes are separate. This is an alternative encoder, not a complete H3 installation. Molmo is loaded in the ComfyUI process and registered with ComfyUI's model manager, which handles GPU loading and offloading alongside other models.
 
 A [native BF16/INT8 tracking comparison](https://huggingface.co/Alissonerdx/Molmo2-8B-Minimax-H3/tree/main/validation/tracking) is available: a short target description failed selection, while explicit shorts/gloves descriptions selected each requested performer in both variants on the same clip.
 

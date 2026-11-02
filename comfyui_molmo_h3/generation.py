@@ -2,6 +2,7 @@
 import re
 import numpy as np
 from PIL import Image
+from .visual_inputs import visual_array
 
 
 POINT_REQUEST = re.compile(
@@ -27,11 +28,11 @@ def prompt_with_point_contract(prompt, visuals):
         'a placeholder. Never invent a point: if the target cannot be located, say so and return no coordinates.')
 
 
-def generation_inputs(processor,prompt,visuals,max_frames=8):
+def generation_inputs(processor,prompt,visuals,max_frames=8,system_prompt=''):
     content=[];presentation=[];counts={}
     for item in visuals:
         kind=item['type'];counts[kind]=counts.get(kind,0)+1
-        data=np.load(item['path'],allow_pickle=False)
+        data=visual_array(item['data'])
         if kind in ('image','source_person'):
             label=('SourcePerson' if kind=='source_person' else 'Picture')+f' {counts[kind]}'
             content.extend([{'type':'text','text':label},{'type':'image','image':Image.fromarray(data[0] if data.ndim==4 else data)}])
@@ -42,7 +43,11 @@ def generation_inputs(processor,prompt,visuals,max_frames=8):
                 content.extend([{'type':'text','text':f"Video {counts[kind]}, frame at {t:.3f}s"},{'type':'image','image':Image.fromarray(data[i])}])
                 presentation.append({'kind':'video','video':counts[kind],'time_seconds':t,'frame_width':w,'frame_height':h})
     content.append({'type':'text','text':prompt})
-    batch=processor.apply_chat_template([{'role':'user','content':content}],tokenize=True,add_generation_prompt=True,return_tensors='pt',return_dict=True)
+    messages=[]
+    if system_prompt and system_prompt.strip():
+        messages.append({'role':'system','content':[{'type':'text','text':system_prompt.strip()}]})
+    messages.append({'role':'user','content':content})
+    batch=processor.apply_chat_template(messages,tokenize=True,add_generation_prompt=True,return_tensors='pt',return_dict=True)
     return batch,presentation
 
 

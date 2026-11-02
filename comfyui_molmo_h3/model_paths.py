@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import sys
 import threading
 import folder_paths
 
@@ -90,8 +89,3 @@ def resolve_projector(model):
     if bundled.is_file():
         return str(bundled)
     raise ValueError(f'Molmo2 package is missing its separate projector: {PROJECTOR_NAME}')
-
-
-def resolve_molmo_python():
-    """Run the Molmo worker with the same Python installation as ComfyUI."""
-    return sys.executable

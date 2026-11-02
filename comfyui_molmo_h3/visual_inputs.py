@@ -3,11 +3,20 @@ import numpy as np
 import torch
 
 
+def visual_array(value):
+    if isinstance(value, torch.Tensor):
+        value = value.detach().cpu().numpy()
+    array = np.asarray(value)
+    if array.dtype != np.uint8:
+        array = np.rint(np.clip(array, 0, 1) * 255).astype(np.uint8)
+    return array
+
+
 def prepare_inputs(processor, ids, visuals, max_video_frames=8):
     images, prefix = [], []
     picture_count = video_count = source_count = 0
     for item in visuals:
-        data = np.load(item['path'], allow_pickle=False)
+        data = visual_array(item['data'])
         if item['type'] in ('image', 'source_person'):
             images.append(data[0] if data.ndim == 4 else data)
             if item['type'] == 'source_person':

@@ -45,7 +45,7 @@ class ConvRotLinear(nn.Module):
         return y.reshape(*x.shape[:-1], self.out_features).to(x.dtype)
 
 
-def load_model(folder, device='cuda'):
+def load_model(folder, device='cpu'):
     """Load the complete quantized package without downloading original weights."""
     from accelerate import init_empty_weights
     from transformers import AutoConfig, AutoModelForImageTextToText
