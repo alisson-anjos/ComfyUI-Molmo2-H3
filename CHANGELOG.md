@@ -5,7 +5,7 @@
 - Load Molmo2 INT8 ConvRot in the ComfyUI process and register it with ComfyUI's model manager for GPU placement and offloading. Remove the worker-process boundary and pass image/video tensors directly to the Molmo processor.
 - Fully unload Molmo after each inference call so ComfyUI does not partially offload ConvRot's quantized buffers between Molmo and H3.
 - Validation: changed Python files compile. Known issue: in a batch run, Molmo2 Analyze References / Points crashed ComfyUI with a CUDA device-side assert (`scatter gather kernel index out of bounds`) on its first request; not yet fixed.
-- Publication: pushed to the `inprocess-molmo` branch for review; `main` stays on 0.4.2.
+- Publication: pushed to `main`.
 
 ## 0.4.2 - 2026-10-31
 
