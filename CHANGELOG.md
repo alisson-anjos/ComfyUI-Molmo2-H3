@@ -3,9 +3,23 @@
 ## 0.5.0 - 2026-11-01
 
 - Load Molmo2 INT8 ConvRot in the ComfyUI process and register it with ComfyUI's model manager for GPU placement and offloading. Remove the worker-process boundary and pass image/video tensors directly to the Molmo processor.
+- Remove the old worker script (`molmo_server.py`); there is no separate Molmo process. The loader returns a `CLIP` like ComfyUI's other text-encoder loaders.
 - Fully unload Molmo after each inference call so ComfyUI does not partially offload ConvRot's quantized buffers between Molmo and H3.
 - Validation: changed Python files compile. Known issue: in a batch run, Molmo2 Analyze References / Points crashed ComfyUI with a CUDA device-side assert (`scatter gather kernel index out of bounds`) on its first request; not yet fixed.
 - Publication: pushed to `main`.
+
+## 0.4.4 - 2026-10-31
+
+- Add a standalone Molmo2 Generate Text node with the same input/output schema and ordering as ComfyUI's built-in node. It executes Molmo generation directly rather than routing through the built-in node. Molmo2 accepts text, image, and video inputs; audio is rejected clearly, and MTP has no effect without MTP weights. The Analyze References / Points node shares the same Molmo inference helper.
+- Validation: Python syntax and diff checks passed; live generation in ComfyUI remains pending a manual restart and GPU run.
+- Publication: pushed to `main`.
+
+## 0.4.3 - 2026-10-31
+
+- Add initial projected-CLIP text-generation entry points; superseded in 0.4.4 by a standalone Molmo2 Generate Text node that does not depend on the built-in node.
+- Report invalid or empty model-generation outputs with a traceback instead of failing later with an opaque `NoneType` error.
+- Validation: source syntax and patch formatting checked; end-to-end Generate Text inference remains pending a manual ComfyUI restart and GPU run.
+- Publication: source version 0.4.3 pushed to `main`; registry package was not published.
 
 ## 0.4.2 - 2026-10-31
 
