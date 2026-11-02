@@ -64,6 +64,23 @@ def load_model(folder, device='cpu'):
             return 1.0 / (base ** exponent), 1.0
         ROPE_INIT_FUNCTIONS['default'] = default_rope
 
+    # Transformers 5.22 ships a native `molmo2` model, so this package's remote
+    # modeling code (modeling_molmo2.py) fails at import time when it registers
+    # Molmo2Config over that entry:
+    #   ValueError: '<class ...Molmo2Config>' is already used by a Transformers model.
+    # Transformers 4.x let the later (remote) registration win. Restore that for
+    # dynamically loaded checkpoint code only, leaving native registrations strict.
+    from transformers.models.auto.auto_factory import _LazyAutoMapping
+    if not getattr(_LazyAutoMapping.register, '_molmo2_remote_override', False):
+        _original_register = _LazyAutoMapping.register
+
+        def register(self, key, value, exist_ok=False):
+            remote = getattr(key, '__module__', '').startswith('transformers_modules.')
+            return _original_register(self, key, value, exist_ok=exist_ok or remote)
+
+        register._molmo2_remote_override = True
+        _LazyAutoMapping.register = register
+
     folder = Path(folder)
     manifest = json.loads((folder/'convrot_config.json').read_text())
     if manifest.get('format') != 'molmo2-convrot-int8-v1':
