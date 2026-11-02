@@ -5,7 +5,8 @@
 - Load Molmo2 INT8 ConvRot in the ComfyUI process and register it with ComfyUI's model manager for GPU placement and offloading. Remove the worker-process boundary and pass image/video tensors directly to the Molmo processor.
 - Remove the old worker script (`molmo_server.py`); there is no separate Molmo process. The loader returns a `CLIP` like ComfyUI's other text-encoder loaders.
 - Fully unload Molmo after each inference call so ComfyUI does not partially offload ConvRot's quantized buffers between Molmo and H3.
-- Validation: changed Python files compile. Known issue: in a batch run, Molmo2 Analyze References / Points crashed ComfyUI with a CUDA device-side assert (`scatter gather kernel index out of bounds`) on its first request; not yet fixed.
+- Fix a CUDA device-side assert (`scatter gather kernel index out of bounds`) that crashed ComfyUI whenever generation had image or video inputs: Transformers' repetition penalty gathered scores at Molmo's image-token ids, which lie past the logits vocabulary. The penalty now skips those ids. MinP no longer replaces other logits processors.
+- Validation: a live Analyze References / Points run (reference crop plus video) completes in ComfyUI without the crash. Known limit: for that request Molmo returned a degenerate track (one image index, centre coordinates), so the node reports no points.
 - Publication: pushed to `main`.
 
 ## 0.4.4 - 2026-10-31

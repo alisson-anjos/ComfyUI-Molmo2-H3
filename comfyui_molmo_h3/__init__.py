@@ -181,8 +181,20 @@ class MolmoRuntime:
             batch, presentation = generation_inputs(processor, prompt, visuals, max_video_frames,
                                                      sampling.pop('system_prompt', ''))
             batch = batch.to(device)
-            options = {'max_new_tokens': max_new_tokens, 'do_sample': bool(sampling.pop('do_sample', False)),
-                       'repetition_penalty': max(1e-5, float(sampling.pop('repetition_penalty', 1.05)))}
+            options = {'max_new_tokens': max_new_tokens, 'do_sample': bool(sampling.pop('do_sample', False))}
+            repetition = max(1e-5, float(sampling.pop('repetition_penalty', 1.05)))
+            if repetition != 1.0:
+                # Transformers' repetition penalty gathers scores at every input id; Molmo's image-token ids lie past
+                # the logits vocabulary and trip a CUDA index assert. Penalize only ids the logits contain.
+                from transformers.generation.logits_process import LogitsProcessor, LogitsProcessorList
+                class RepetitionPenalty(LogitsProcessor):
+                    def __call__(self, input_ids, scores):
+                        for row in range(input_ids.shape[0]):
+                            seen = input_ids[row][input_ids[row] < scores.shape[-1]].unique()
+                            score = scores[row, seen]
+                            scores[row, seen] = torch.where(score < 0, score * repetition, score / repetition)
+                        return scores
+                options['logits_processor'] = LogitsProcessorList([RepetitionPenalty()])
             if options['do_sample']:
                 options.update(temperature=max(1e-5, float(sampling.pop('temperature', .7))),
                                top_k=int(sampling.pop('top_k', 64)), top_p=float(sampling.pop('top_p', .95)))
@@ -190,7 +202,7 @@ class MolmoRuntime:
                 if min_p > 0:
                     from transformers.generation.logits_process import MinPLogitsWarper
                     from transformers.generation.logits_process import LogitsProcessorList
-                    options['logits_processor'] = LogitsProcessorList([MinPLogitsWarper(min_p)])
+                    options['logits_processor'] = LogitsProcessorList(list(options.get('logits_processor', [])) + [MinPLogitsWarper(min_p)])
                 presence = float(sampling.pop('presence_penalty', 0.))
                 if presence:
                     from transformers.generation.logits_process import LogitsProcessor, LogitsProcessorList
