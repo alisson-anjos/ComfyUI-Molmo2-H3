@@ -69,11 +69,18 @@ def load_model(folder, device='cpu'):
     if manifest.get('format') != 'molmo2-convrot-int8-v1':
         raise ValueError('Unsupported ConvRot package format')
     config = AutoConfig.from_pretrained(folder, trust_remote_code=True)
-    with init_empty_weights():
-        model = AutoModelForImageTextToText.from_config(config, trust_remote_code=True, torch_dtype=torch.bfloat16)
-        for name, spec in manifest['modules'].items():
-            parent, _, leaf = name.rpartition('.')
-            setattr(model.get_submodule(parent), leaf, ConvRotLinear(**spec))
+    # Transformers 5.22+ ships Molmo2, and modeling_molmo2.py registers it again on import. Packages downloaded before
+    # the repository added exist_ok=True to that call fail with "already used by a Transformers model".
+    register = AutoModelForImageTextToText.register
+    AutoModelForImageTextToText.register = lambda config_class, model_class, exist_ok=True: register(config_class, model_class, exist_ok=exist_ok)
+    try:
+        with init_empty_weights():
+            model = AutoModelForImageTextToText.from_config(config, trust_remote_code=True, torch_dtype=torch.bfloat16)
+            for name, spec in manifest['modules'].items():
+                parent, _, leaf = name.rpartition('.')
+                setattr(model.get_submodule(parent), leaf, ConvRotLinear(**spec))
+    finally:
+        del AutoModelForImageTextToText.register
     expected = set(model.state_dict())
     seen = set()
     for shard in manifest['shards']:

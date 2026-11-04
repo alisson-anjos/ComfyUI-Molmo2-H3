@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 - 2026-11-04
+
+- Load with Transformers 5.22+, which ships Molmo2 itself: `modeling_molmo2.py` registered the model again on import and failed with `Molmo2Config is already used by a Transformers model`. The loader now lets that registration pass, so packages downloaded earlier keep working; the model repository's `modeling_molmo2.py` also passes `exist_ok=True` now.
+- The model repository's standalone `convrot_runtime.py` now matches this loader (including the Transformers 5.x RoPE fallback), and its `requirements.txt` asks for `transformers>=4.57.1`.
+- Validation: the loader builds the model past registration with Transformers 4.57.1, 5.17.0 and 5.22.1, with both the previous and the fixed `modeling_molmo2.py`.
+
 ## 0.5.0 - 2026-11-01
 
 - Load Molmo2 INT8 ConvRot in the ComfyUI process and register it with ComfyUI's model manager for GPU placement and offloading. Remove the worker-process boundary and pass image/video tensors directly to the Molmo processor.
