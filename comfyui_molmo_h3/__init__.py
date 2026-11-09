@@ -110,10 +110,11 @@ class MolmoRuntime:
 
     @classmethod
     def get(cls, model_path):
+        key = model_path
         with cls._lock:
-            runtime = cls._instances.get(model_path)
+            runtime = cls._instances.get(key)
             if runtime is None:
-                runtime = cls._instances[model_path] = cls(model_path)
+                runtime = cls._instances[key] = cls(model_path)
             return runtime
 
     def __init__(self, model_path):
@@ -138,16 +139,37 @@ class MolmoRuntime:
         prepare_processor_compatibility()
         processor = AutoProcessor.from_pretrained(self.model_path, trust_remote_code=True)
         model = MolmoComfyModel(hf_model)
+        # module_size misses the convrot-quantized weights (~8.7 GB counted as ~1.5 GB), so ComfyUI would not free
+        # enough VRAM for Molmo2 next to H3 and crash out of memory. Count every tensor, and never less than the weight
+        # files on disk, plus headroom for the vision forward.
+        def tensor_bytes(module):
+            seen, total = set(), 0
+            for obj in list(module.state_dict(keep_vars=True).values()) + [v for m in module.modules() for v in vars(m).values()]:
+                if torch.is_tensor(obj) and id(obj) not in seen:
+                    seen.add(id(obj)); total += obj.numel() * obj.element_size()
+            return total
+        on_disk = sum(os.path.getsize(os.path.join(self.model_path, f)) for f in os.listdir(self.model_path)
+                      if f.endswith('.safetensors'))
+        size = int(max(mm.module_size(model), tensor_bytes(model), on_disk) * 1.15)
+        print(f'[Molmo2 H3] VRAM size for ComfyUI: {size / 2**30:.1f} GB '
+              f'(module_size {mm.module_size(model) / 2**30:.1f} GB)', flush=True)
         self.patcher = comfy.model_patcher.ModelPatcher(
-            model, load_device=mm.get_torch_device(), offload_device=mm.text_encoder_offload_device(),
-            size=mm.module_size(model))
+            model, load_device=mm.get_torch_device(), offload_device=mm.text_encoder_offload_device(), size=size)
         self.model = model
         self.processor = processor
 
     def _load_gpu(self):
         self.load()
+        device = mm.get_torch_device()
+        # The int8 ConvRot weights are buffers, which ComfyUI's partial load/unload does not track (it reports ~1.5 of
+        # 8.7 GB as loaded). Make room for the whole model first, then move all of it explicitly.
+        # A partially resident H3 (it only frees what it thinks is needed) next to Molmo2's vision forward aborts the
+        # process: take everything else off the GPU while Molmo2 runs. H3 reloads from RAM afterwards.
+        mm.unload_all_models()
+        mm.soft_empty_cache(True)
         mm.load_models_gpu([self.patcher], force_full_load=True)
-        return self.model, self.processor, mm.get_torch_device()
+        self.model.to(device)
+        return self.model, self.processor, device
 
     @contextmanager
     def _gpu_model(self):
@@ -156,6 +178,12 @@ class MolmoRuntime:
         finally:
             if self.patcher is not None:
                 mm.unload_model_and_clones(self.patcher)
+            if self.model is not None:
+                # Otherwise the untracked buffers stay on the GPU and pile up under the next H3 load.
+                self.model.to(mm.text_encoder_offload_device())
+            import gc
+            gc.collect()
+            mm.soft_empty_cache(True)
 
     def hidden(self, ids, tap, visuals=None, max_video_frames=8):
         from .visual_inputs import prepare_inputs
@@ -175,13 +203,67 @@ class MolmoRuntime:
             return hidden.float().to('cpu', dtype=torch.float16)
 
 
+    def track_subject(self, query, frames, fps, layer=24, max_new_tokens=768, max_fps=2.0, max_crops=4):
+        """Track one subject exactly as the subject-binding labels were made: Molmo2's native video input (frames every
+        1/max_fps s plus the last one, molmo_utils' 'uniform_last_frame' sampling), the query before the video,
+        greedy decoding, and the mean layer-`layer` hidden state of the generated tokens."""
+        return self.track_subjects([query], frames, fps, layer, max_new_tokens, max_fps, max_crops)[0]
+
+    def track_subjects(self, queries, frames, fps, layer=24, max_new_tokens=768, max_fps=2.0, max_crops=4):
+        """One separate Molmo2 request per query (as in training: each vector belongs to one person), all with a single
+        model load."""
+        import re
+        import numpy as np
+        from .visual_inputs import visual_array
+        video = visual_array(frames)
+        n, height, width = video.shape[:3]
+        duration = n / float(fps)
+        times = np.concatenate([np.arange(0.0, duration, 1.0 / max_fps), [duration]])
+        indices = np.minimum(np.floor(times * fps + 1e-6).astype(int), n - 1)
+        metadata = dict(total_num_frames=n, fps=float(fps), duration=duration, video_backend='pyav',
+                        height=height, width=width, frames_indices=times * fps)
+        clip_frames = [video[i] for i in indices]
+        results = []
+        with self.lock, self._gpu_model() as (model, processor, device):
+            image_processor = getattr(processor, 'image_processor', None)
+            old_crops = getattr(image_processor, 'max_crops', None)
+            if old_crops is not None: image_processor.max_crops = max_crops
+            try:
+                for query in queries:
+                    messages = [{'role': 'user', 'content': [{'type': 'text', 'text': query},
+                                                             {'type': 'video', 'video': 'frames'}]}]
+                    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    batch = processor(videos=[clip_frames], video_metadata=[metadata], text=text,
+                                      padding=True, return_tensors='pt', do_sample_frames=False)
+                    batch = {k: v.to(device) if hasattr(v, 'to') else v for k, v in batch.items()}
+                    with torch.inference_mode():
+                        generated = model.generate(**batch, max_new_tokens=max_new_tokens, do_sample=False,
+                                                   output_hidden_states=True, return_dict_in_generate=True)
+                    n_in = batch['input_ids'].shape[1]
+                    answer = processor.tokenizer.decode(generated.sequences[0, n_in:], skip_special_tokens=True)
+                    steps = generated.hidden_states
+                    if len(steps) < 2 or len(steps[1]) <= layer:
+                        raise RuntimeError('Molmo2 generation did not return layer-%d token states' % layer)
+                    vector = torch.stack([steps[j][layer][0, -1].float() for j in range(1, len(steps))]).mean(0)
+                    del generated, steps
+                    points = [(float(t), int(o), int(x) / 1000, int(y) / 1000)
+                              for t, o, x, y in re.findall(r'([0-9.]+) (\d+) (\d{3,4}) (\d{3,4})', answer)]
+                    results.append({'query': query, 'text': answer, 'points': points,
+                                    'vector': vector.to('cpu', torch.float16), 'sampled_times': times.tolist()})
+            finally:
+                if old_crops is not None: image_processor.max_crops = old_crops
+        return results
+
     def generate(self, prompt, visuals, max_new_tokens=1024, max_video_frames=8, **sampling):
         from .generation import generation_inputs, response_points
+        collect_vector = bool(sampling.pop('collect_vector', False))
         with self.lock, self._gpu_model() as (model, processor, device):
             batch, presentation = generation_inputs(processor, prompt, visuals, max_video_frames,
                                                      sampling.pop('system_prompt', ''))
             batch = batch.to(device)
             options = {'max_new_tokens': max_new_tokens, 'do_sample': bool(sampling.pop('do_sample', False))}
+            if collect_vector:
+                options.update(output_hidden_states=True, return_dict_in_generate=True)
             repetition = max(1e-5, float(sampling.pop('repetition_penalty', 1.05)))
             if repetition != 1.0:
                 # Transformers' repetition penalty gathers scores at every input id; Molmo's image-token ids lie past
@@ -218,18 +300,27 @@ class MolmoRuntime:
             seed = sampling.pop('seed', None)
             with torch.inference_mode():
                 if seed is None:
-                    sequences = model.generate(**batch, **options)
+                    generated = model.generate(**batch, **options)
                 else:
                     with torch.random.fork_rng(devices=[device.index] if device.type == 'cuda' else []):
                         torch.manual_seed(int(seed))
                         if device.type == 'cuda': torch.cuda.manual_seed(int(seed))
-                        sequences = model.generate(**batch, **options)
-            if isinstance(sequences, dict):
-                sequences = sequences.get('sequences')
+                        generated = model.generate(**batch, **options)
+            sequences = generated.get('sequences') if isinstance(generated, dict) else getattr(generated, 'sequences', generated)
             if sequences is None or sequences.shape[0] == 0:
                 raise RuntimeError('Molmo2 returned no generated tokens')
             answer = processor.tokenizer.decode(sequences[0, batch['input_ids'].shape[1]:], skip_special_tokens=True)
-            return {'text': answer, 'points': response_points(answer, presentation)}
+            result = {'text': answer, 'points': response_points(answer, presentation)}
+            if collect_vector:
+                hidden_states = generated.get('hidden_states') if isinstance(generated, dict) else getattr(generated, 'hidden_states', None)
+                if not hidden_states or len(hidden_states) < 2:
+                    raise RuntimeError('Molmo2 generation did not return token hidden states for subject binding')
+                layer = 24
+                if len(hidden_states[1]) <= layer:
+                    raise RuntimeError(f'Molmo2 layer {layer} is missing from generated token states')
+                new = torch.stack([hidden_states[j][layer][0, -1].float() for j in range(1, len(hidden_states))])
+                result['vector'] = new.mean(0).to(device='cpu', dtype=torch.float16)
+            return result
 
 
 class MolmoComfyModel(torch.nn.Module):
@@ -340,15 +431,36 @@ class MolmoH3EncoderLoader:
     def INPUT_TYPES(cls):
         return {'required': {}}
 
-    RETURN_TYPES = ('CLIP',); FUNCTION = 'load'; CATEGORY = 'Molmo2/H3'
+    RETURN_TYPES = ('CLIP',)
+    RETURN_NAMES = ('clip',)
+    OUTPUT_TOOLTIPS = ('Molmo2 projected CLIP for MiniMax H3. Model weights and projection are downloaded automatically from HuggingFace (Alissonerdx/Molmo2-8B-Minimax-H3) on first use.',)
+    FUNCTION = 'load'
+    CATEGORY = 'Molmo2/H3'
+    DESCRIPTION = 'Auto Download & Load Molmo2: Automatically downloads missing Molmo2-8B INT8 and Projection files from HuggingFace (Alissonerdx/Molmo2-8B-Minimax-H3) into models/text_encoders on first use.'
 
     def load(self):
         molmo_path = resolve_model()
         return (MolmoProjectedCLIP(molmo_path, resolve_projector(molmo_path)),)
 
 
-NODE_CLASS_MAPPINGS = {'MolmoH3EncoderLoader': MolmoH3EncoderLoader}
-NODE_DISPLAY_NAME_MAPPINGS = {'MolmoH3EncoderLoader': 'Molmo2 as H3 encoder (projection, experimental)'}
+NODE_CLASS_MAPPINGS = {
+    'MolmoH3EncoderLoader': MolmoH3EncoderLoader,
+    'AutoDownloadLoadMolmo2': MolmoH3EncoderLoader,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    'MolmoH3EncoderLoader': 'Auto Download & Load Molmo2 (H3 Encoder)',
+    'AutoDownloadLoadMolmo2': 'Auto Download Load Molmo2',
+    'Molmo2VisionAnalyzer': 'Molmo2 Vision Analyzer & Tracker',
+    'MolmoSAM3Loader': 'Molmo2 SAM 3.1 Loader',
+    'MolmoSAM3Propagate': 'Molmo2 SAM 3.1 Propagate (Video Segmentation)',
+    'MolmoH3TrackSubjects': 'Molmo2 Track Subjects (one per Picture) + Binding Vectors',
+    'MolmoH3TrackSubjectVector': 'Molmo2 Track Subject + Binding Vector',
+    'MolmoH3DrawPoints': 'Molmo2 Draw Video Points',
+    'MolmoH3SAM3Track': 'Molmo2 Points to SAM 3.1 Track',
+    'Molmo2TextGenerate': 'Molmo2 Generate Text',
+    'MolmoH3ReferenceToVideo': 'MiniMax H3 Reference to Video (Molmo2)',
+    'MolmoH3AnalyzeReferences': 'Molmo2 Analyze References / Points',
+}
 
 from .nodes import NODE_CLASS_MAPPINGS as _reference_nodes
 NODE_CLASS_MAPPINGS.update(_reference_nodes)

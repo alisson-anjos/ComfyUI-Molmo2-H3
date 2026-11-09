@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 - 2026-11-09
+
+- Add **Molmo2 Vision Analyzer & Tracker** (`Molmo2VisionAnalyzer`): unified vision task runner with task dropdown (`Track by text`, `Track by Reference Image 1`, `Track Multi-Subject (Image 1..3 -> Picture 1..3)`, `Describe person / subject`, `Describe video action`, `Verify same person`, `Locate / Spatial points`, `Custom task / prompt`). Outputs `response`, `points` (JSON points compatible with `Molmo2 Draw Video Points`), `subjects_json` (multi-subject tracking for H3 conditioning), `marked_video` (video with colored dots drawn), and `binding_vector` (layer-24 attention binding token vector).
+- Add **Molmo2 SAM 3.1 Loader** (`MolmoSAM3Loader`): loads `sam3.1_multiplex_fp16.safetensors` from `models/checkpoints`.
+- Add **Molmo2 SAM 3.1 Propagate (Video Segmentation)** (`MolmoSAM3Propagate`): bidirectional SAM 3.1 video segmentation matching BFS propagate. Tracks forward and backward from anchor points or initial masks per shot, with automatic camera cut detection to prevent bleed across camera cuts.
+- Update **Auto Download & Load Molmo2** (`MolmoH3EncoderLoader` / `AutoDownloadLoadMolmo2`): added explicit description and tooltip indicating that Molmo2-8B INT8 and Projection weights are downloaded automatically from HuggingFace (`Alissonerdx/Molmo2-8B-Minimax-H3`) on first run.
+
 ## 0.5.1 - 2026-11-04
 
 - Load with Transformers 5.22+, which ships Molmo2 itself: `modeling_molmo2.py` registered the model again on import and failed with `Molmo2Config is already used by a Transformers model`. The loader now lets that registration pass, so packages downloaded earlier keep working; the model repository's `modeling_molmo2.py` also passes `exist_ok=True` now.
